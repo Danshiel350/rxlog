@@ -890,8 +890,8 @@ input[type="number"] { -moz-appearance: textfield; }
       </div>
       <div class="form-row">
         <div class="form-group">
-          <label class="form-label">Weight (kg)</label>
-          <input class="form-input" id="exercise-weight" type="number" placeholder="80" inputmode="decimal">
+          <label class="form-label">Weight hint (optional)</label>
+          <input class="form-input" id="exercise-weight" type="number" placeholder="e.g. 80" inputmode="decimal">
         </div>
         <div class="form-group">
           <label class="form-label">Rest (sec)</label>
@@ -1105,7 +1105,12 @@ function renderBlocks() {
 }
 
 function exerciseDetail(ex, mode) {
-  if (mode === 'strength') return `${ex.sets || 0}×${ex.reps || 0} @ ${ex.weight || 0}kg · ${ex.rest || 0}s rest`;
+  if (mode === 'strength') {
+    let detail = `${ex.sets || 0} × ${ex.reps || 0}`;
+    if (ex.weight) detail += ` · hint: ${ex.weight}kg`;
+    detail += ` · ${ex.rest || 0}s rest`;
+    return detail;
+  }
   if (mode === 'emom') return `${ex.reps || 0} reps/interval`;
   if (mode === 'amrap') return `${ex.reps || 0} reps/round`;
   return '';
@@ -1336,6 +1341,9 @@ function renderStrengthBlock(block) {
   const ex = block.exercises[activeSession.currentExercise];
   if (!ex) return '';
   const totalSets = ex.sets || 3;
+  const lastWeight = getLastWeight(ex.name);
+  const defaultWeight = lastWeight || ex.weight || '';
+  const lastWeightLabel = lastWeight ? `Last: ${lastWeight}kg` : (ex.weight ? `Hint: ${ex.weight}kg` : '');
 
   let setsHtml = '';
   for (let s = 0; s < totalSets; s++) {
@@ -1347,9 +1355,9 @@ function renderStrengthBlock(block) {
       <div class="set-row ${isActive ? 'active' : ''} ${isDone ? 'completed' : ''}">
         <div class="set-number">S${s + 1}</div>
         <div class="set-field">
-          <input class="set-input" type="number" inputmode="decimal" value="${log ? log.weight : ex.weight || ''}"
+          <input class="set-input" type="number" inputmode="decimal" value="${log ? log.weight : ''}"
             onchange="updateSetLog(${activeSession.currentBlock},${activeSession.currentExercise},${s},'weight',+this.value)"
-            placeholder="${ex.weight || '—'}">
+            placeholder="${defaultWeight || '—'}">
           <span class="set-input-label">kg</span>
         </div>
         <div class="set-field">
@@ -1386,7 +1394,8 @@ function renderStrengthBlock(block) {
     <div class="current-exercise">
       <div class="exercise-label">Exercise ${activeSession.currentExercise + 1}/${block.exercises.length}</div>
       <div class="exercise-title">${esc(ex.name)}</div>
-      <div class="exercise-prescription">${totalSets} × ${ex.reps} @ ${ex.weight || '—'}kg · ${ex.rest || 60}s rest</div>
+      <div class="exercise-prescription">${totalSets} × ${ex.reps} · ${ex.rest || 60}s rest</div>
+      ${lastWeightLabel ? `<div style="font-size:13px;color:var(--accent);margin-top:4px">${lastWeightLabel}</div>` : ''}
     </div>
     ${restDisplay}
     <div class="set-tracker">${setsHtml}</div>`;
@@ -1427,14 +1436,16 @@ function renderSupersetBlock(block) {
       const log = getSetLog(bi, ei, r);
       const isDone = log && log.done;
       const isActive = isCurrentRound && ei === currentExInRound && !isDone;
+      const lw = getLastWeight(ex.name);
+      const placeholder = lw || ex.weight || '—';
 
       roundsHtml += `
         <div class="set-row ${isActive ? 'active' : ''} ${isDone ? 'completed' : ''}" style="margin-bottom:4px">
           <div class="set-number" style="width:40px">${labels[ei]}</div>
           <div style="flex:1;font-size:13px;font-weight:600;${isDone ? 'text-decoration:line-through;opacity:0.5' : ''}">${esc(ex.name)}</div>
           <div class="set-field">
-            <input class="set-input" type="number" inputmode="decimal" value="${log ? log.weight : ex.weight || ''}"
-              onchange="updateSetLog(${bi},${ei},${r},'weight',+this.value)" placeholder="${ex.weight || '—'}" style="width:56px">
+            <input class="set-input" type="number" inputmode="decimal" value="${log ? log.weight : ''}"
+              onchange="updateSetLog(${bi},${ei},${r},'weight',+this.value)" placeholder="${placeholder}" style="width:56px">
             <span class="set-input-label">kg</span>
           </div>
           <div class="set-field">
@@ -1536,6 +1547,24 @@ function renderTimerDisplay() {
   }
 }
 
+function getLastWeight(exerciseName) {
+  for (const h of history) {
+    for (const block of (h.blocks || [])) {
+      for (const ex of block.exercises) {
+        if (ex.name === exerciseName) {
+          const logs = (h.setLogs || []).filter(l => {
+            const bIdx = h.blocks.indexOf(block);
+            const eIdx = block.exercises.indexOf(ex);
+            return l.bi === bIdx && l.ei === eIdx && l.done && l.weight > 0;
+          });
+          if (logs.length > 0) return logs[0].weight;
+        }
+      }
+    }
+  }
+  return null;
+}
+
 // Strength helpers
 function getSetLog(bi, ei, si) {
   return activeSession.setLogs.find(l => l.bi === bi && l.ei === ei && l.si === si);
@@ -1558,7 +1587,8 @@ function completeSet(si) {
 
   let log = getSetLog(bi, ei, si);
   if (!log) {
-    log = { bi, ei, si, weight: ex.weight || 0, reps: ex.reps || 0, done: false };
+    const lw = getLastWeight(ex.name);
+    log = { bi, ei, si, weight: lw || ex.weight || 0, reps: ex.reps || 0, done: false };
     activeSession.setLogs.push(log);
   }
   log.done = !log.done;
@@ -1593,7 +1623,8 @@ function completeSupersetExercise(round, ei) {
 
   let log = getSetLog(bi, ei, round);
   if (!log) {
-    log = { bi, ei, si: round, weight: ex.weight || 0, reps: ex.reps || 0, done: false };
+    const lw = getLastWeight(ex.name);
+    log = { bi, ei, si: round, weight: lw || ex.weight || 0, reps: ex.reps || 0, done: false };
     activeSession.setLogs.push(log);
   }
   log.done = !log.done;
