@@ -2,7 +2,7 @@
   "name": "RXLOG",
   "short_name": "RXLOG",
   "description": "Workout logger with Strength, EMOM & AMRAP modes",
-  "start_url": "/index.html",
+  "start_url": "./index.html",
   "display": "standalone",
   "background_color": "#0A0A0A",
   "theme_color": "#0A0A0A",
