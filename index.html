@@ -985,6 +985,7 @@ function renderWorkouts() {
   el.innerHTML = workouts.map(w => {
     const totalExercises = w.blocks.reduce((sum, b) => sum + b.exercises.length, 0);
     const modes = [...new Set(w.blocks.map(b => b.mode))];
+    const hasSuperset = w.blocks.some(b => b.superset);
     return `
       <div class="card" onclick="startWorkout('${w.id}')">
         <div style="display:flex;align-items:flex-start;justify-content:space-between">
@@ -999,6 +1000,7 @@ function renderWorkouts() {
         </div>
         <div class="card-meta">
           ${modes.map(m => `<span class="meta-tag accent">${m}</span>`).join('')}
+          ${hasSuperset ? '<span class="meta-tag accent">superset</span>' : ''}
         </div>
       </div>`;
   }).join('');
@@ -1030,7 +1032,7 @@ function editWorkout(id) {
 }
 
 function addBlock() {
-  builderBlocks.push({ mode: 'strength', exercises: [], duration: 10, interval: 60 });
+  builderBlocks.push({ mode: 'strength', exercises: [], duration: 10, interval: 60, superset: false });
   renderBlocks();
 }
 
@@ -1038,8 +1040,19 @@ function renderBlocks() {
   const container = document.getElementById('blocks-container');
   container.innerHTML = builderBlocks.map((block, bi) => {
     let extraFields = '';
+
+    if (block.mode === 'strength' && block.exercises.length >= 2) {
+      extraFields += `
+        <div style="display:flex;align-items:center;gap:10px;margin-bottom:12px;padding:10px 14px;background:var(--surface-2);border-radius:var(--radius-sm)">
+          <label style="flex:1;font-size:13px;font-weight:600;color:${block.superset ? 'var(--accent)' : 'var(--text-secondary)'}">Superset</label>
+          <button onclick="toggleSuperset(${bi})" style="width:48px;height:28px;border-radius:14px;border:none;cursor:pointer;position:relative;background:${block.superset ? 'var(--accent)' : 'var(--surface-3)'};transition:background 0.2s">
+            <span style="position:absolute;top:2px;${block.superset ? 'right:2px' : 'left:2px'};width:24px;height:24px;border-radius:50%;background:${block.superset ? '#0A0A0A' : 'var(--text-muted)'};transition:all 0.2s"></span>
+          </button>
+        </div>`;
+    }
+
     if (block.mode === 'emom') {
-      extraFields = `
+      extraFields += `
         <div class="form-row" style="margin-bottom:12px">
           <div class="form-group" style="margin-bottom:0">
             <label class="form-label">Rounds</label>
@@ -1096,6 +1109,11 @@ function exerciseDetail(ex, mode) {
   if (mode === 'emom') return `${ex.reps || 0} reps/interval`;
   if (mode === 'amrap') return `${ex.reps || 0} reps/round`;
   return '';
+}
+
+function toggleSuperset(bi) {
+  builderBlocks[bi].superset = !builderBlocks[bi].superset;
+  renderBlocks();
 }
 
 function setBlockMode(bi, mode) {
@@ -1199,6 +1217,8 @@ function startWorkout(id) {
     amrapRounds: 0,
     amrapReps: 0,
     emomCurrentRound: 0,
+    supersetRound: 0,
+    supersetExIndex: 0,
     timerRunning: false,
     timerSeconds: 0,
     restSeconds: 0,
@@ -1309,6 +1329,10 @@ function renderTrainView() {
 }
 
 function renderStrengthBlock(block) {
+  if (block.superset && block.exercises.length >= 2) {
+    return renderSupersetBlock(block);
+  }
+
   const ex = block.exercises[activeSession.currentExercise];
   if (!ex) return '';
   const totalSets = ex.sets || 3;
@@ -1366,6 +1390,71 @@ function renderStrengthBlock(block) {
     </div>
     ${restDisplay}
     <div class="set-tracker">${setsHtml}</div>`;
+}
+
+function renderSupersetBlock(block) {
+  const bi = activeSession.currentBlock;
+  const maxSets = Math.max(...block.exercises.map(e => e.sets || 3));
+  const currentRound = activeSession.supersetRound || 0;
+  const currentExInRound = activeSession.supersetExIndex || 0;
+  const currentEx = block.exercises[currentExInRound];
+  const labels = block.exercises.length === 2 ? ['A', 'B'] : block.exercises.map((_, i) => String.fromCharCode(65 + i));
+
+  const restDisplay = activeSession.isResting ?
+    `<div class="timer-display">
+      <div class="timer-value">${Math.ceil(activeSession.restSeconds)}</div>
+      <div class="timer-label">Rest — then Round ${currentRound + 1 + 1}</div>
+      <div class="timer-edit-row">
+        <button class="btn btn-secondary btn-sm" style="width:auto;padding:6px 12px" onclick="adjustRest(-15)">−15s</button>
+        <button class="btn btn-secondary btn-sm" style="width:auto;padding:6px 12px" onclick="adjustRest(15)">+15s</button>
+        <button class="btn btn-primary btn-sm" style="width:auto;padding:6px 12px" onclick="skipRest()">Skip</button>
+      </div>
+    </div>` : '';
+
+  let roundsHtml = '';
+  for (let r = 0; r < maxSets; r++) {
+    const isCurrentRound = r === currentRound;
+    const roundDone = block.exercises.every((ex, ei) => {
+      if (r >= (ex.sets || 3)) return true;
+      const log = getSetLog(bi, ei, r);
+      return log && log.done;
+    });
+
+    roundsHtml += `<div class="block-header"><span class="block-label" style="color:${roundDone ? 'var(--text-muted)' : isCurrentRound ? 'var(--accent)' : 'var(--text-secondary)'}">Round ${r + 1}</span><span class="block-line"></span></div>`;
+
+    block.exercises.forEach((ex, ei) => {
+      if (r >= (ex.sets || 3)) return;
+      const log = getSetLog(bi, ei, r);
+      const isDone = log && log.done;
+      const isActive = isCurrentRound && ei === currentExInRound && !isDone;
+
+      roundsHtml += `
+        <div class="set-row ${isActive ? 'active' : ''} ${isDone ? 'completed' : ''}" style="margin-bottom:4px">
+          <div class="set-number" style="width:40px">${labels[ei]}</div>
+          <div style="flex:1;font-size:13px;font-weight:600;${isDone ? 'text-decoration:line-through;opacity:0.5' : ''}">${esc(ex.name)}</div>
+          <div class="set-field">
+            <input class="set-input" type="number" inputmode="decimal" value="${log ? log.weight : ex.weight || ''}"
+              onchange="updateSetLog(${bi},${ei},${r},'weight',+this.value)" placeholder="${ex.weight || '—'}" style="width:56px">
+            <span class="set-input-label">kg</span>
+          </div>
+          <div class="set-field">
+            <input class="set-input" type="number" inputmode="numeric" value="${log ? log.reps : ex.reps || ''}"
+              onchange="updateSetLog(${bi},${ei},${r},'reps',+this.value)" placeholder="${ex.reps || '—'}" style="width:56px">
+            <span class="set-input-label">reps</span>
+          </div>
+          <button class="set-check ${isDone ? 'done' : ''}" onclick="completeSupersetExercise(${r},${ei})">✓</button>
+        </div>`;
+    });
+  }
+
+  return `
+    <div class="current-exercise">
+      <div class="exercise-label">Superset · Round ${currentRound + 1}/${maxSets}</div>
+      <div class="exercise-title">${labels[currentExInRound]}: ${esc(currentEx.name)}</div>
+      <div class="exercise-prescription">${block.exercises.map((e, i) => `${labels[i]}: ${e.reps} reps`).join(' · ')}</div>
+    </div>
+    ${restDisplay}
+    <div class="set-tracker" style="padding:0 16px">${roundsHtml}</div>`;
 }
 
 function renderEmomBlock(block) {
@@ -1497,6 +1586,52 @@ function completeSet(si) {
   renderTrainView();
 }
 
+function completeSupersetExercise(round, ei) {
+  const bi = activeSession.currentBlock;
+  const block = activeSession.blocks[bi];
+  const ex = block.exercises[ei];
+
+  let log = getSetLog(bi, ei, round);
+  if (!log) {
+    log = { bi, ei, si: round, weight: ex.weight || 0, reps: ex.reps || 0, done: false };
+    activeSession.setLogs.push(log);
+  }
+  log.done = !log.done;
+
+  if (log.done) {
+    const maxSets = Math.max(...block.exercises.map(e => e.sets || 3));
+    const roundDone = block.exercises.every((e, i) => {
+      if (round >= (e.sets || 3)) return true;
+      const l = getSetLog(bi, i, round);
+      return l && l.done;
+    });
+
+    if (roundDone) {
+      const nextRound = round + 1;
+      if (nextRound >= maxSets) {
+        nextBlock();
+        return;
+      }
+      activeSession.supersetRound = nextRound;
+      activeSession.supersetExIndex = 0;
+      const lastEx = block.exercises[block.exercises.length - 1];
+      activeSession.isResting = true;
+      activeSession.restSeconds = lastEx.rest || 60;
+      activeSession.timerRunning = true;
+    } else {
+      let nextEi = ei + 1;
+      while (nextEi < block.exercises.length && round >= (block.exercises[nextEi].sets || 3)) {
+        nextEi++;
+      }
+      if (nextEi < block.exercises.length) {
+        activeSession.supersetExIndex = nextEi;
+      }
+    }
+  }
+
+  renderTrainView();
+}
+
 function adjustRest(delta) {
   activeSession.restSeconds = Math.max(0, activeSession.restSeconds + delta);
 }
@@ -1559,6 +1694,8 @@ function nextBlock() {
   activeSession.isResting = false;
   activeSession.emomCurrentRound = 0;
   activeSession.amrapRounds = 0;
+  activeSession.supersetRound = 0;
+  activeSession.supersetExIndex = 0;
   renderTrainView();
 }
 
