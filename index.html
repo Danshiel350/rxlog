@@ -665,6 +665,57 @@ body {
   background: var(--surface-3);
 }
 
+/* ── SUPERSET GROUP (builder) ── */
+.superset-group {
+  border: 1px solid var(--accent);
+  border-radius: var(--radius-sm);
+  padding: 10px;
+  margin-bottom: 8px;
+  background: var(--accent-bg);
+  position: relative;
+}
+
+.superset-group-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 8px;
+}
+
+.superset-group-label {
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.8px;
+  color: var(--accent);
+}
+
+.superset-group .exercise-item {
+  background: var(--surface);
+  margin-bottom: 6px;
+}
+
+.superset-group .exercise-item:last-of-type {
+  margin-bottom: 0;
+}
+
+.ss-letter {
+  font-size: 12px;
+  font-weight: 800;
+  color: var(--accent);
+  width: 20px;
+  text-align: center;
+  flex-shrink: 0;
+}
+
+.ss-connector {
+  width: 2px;
+  height: 8px;
+  background: var(--accent);
+  opacity: 0.4;
+  margin: 0 auto;
+}
+
 /* scrollbar */
 ::-webkit-scrollbar { width: 0; }
 
@@ -931,9 +982,6 @@ input[type="number"] { -moz-appearance: textfield; }
 </div>
 
 <script>
-// ═══════════════════════════════════════
-// DATA LAYER
-// ═══════════════════════════════════════
 const DB = {
   get(key, fallback) {
     try { const v = localStorage.getItem('rxlog_' + key); return v ? JSON.parse(v) : fallback; }
@@ -949,26 +997,38 @@ let timerInterval = null;
 let sessionStartTime = null;
 let editingWorkoutId = null;
 let currentBlockIndex = null;
+let currentSupersetId = null;
 
-// ═══════════════════════════════════════
-// TAB SWITCHING
-// ═══════════════════════════════════════
+function getEntries(block) {
+  if (block.mode !== 'strength') return block.exercises.map((ex, i) => ({ type: 'exercise', ex, idx: i }));
+  const entries = [];
+  const seen = new Set();
+  for (let i = 0; i < block.exercises.length; i++) {
+    const ex = block.exercises[i];
+    if (ex.ssId) {
+      if (seen.has(ex.ssId)) continue;
+      seen.add(ex.ssId);
+      const group = [];
+      block.exercises.forEach((e, j) => { if (e.ssId === ex.ssId) group.push({ ex: e, idx: j }); });
+      entries.push({ type: 'superset', ssId: ex.ssId, exercises: group });
+    } else {
+      entries.push({ type: 'exercise', ex, idx: i });
+    }
+  }
+  return entries;
+}
+
 function switchTab(name) {
   document.querySelectorAll('.view').forEach(v => v.classList.remove('active'));
   document.querySelectorAll('.tab-bar button').forEach(b => b.classList.remove('active'));
   document.getElementById('view-' + name).classList.add('active');
   document.querySelector(`[data-tab="${name}"]`).classList.add('active');
-
   const fab = document.getElementById('fab');
   fab.className = 'fab' + (name !== 'workouts' ? ' hidden' : '');
-
   if (name === 'history') renderHistory();
   if (name === 'workouts') renderWorkouts();
 }
 
-// ═══════════════════════════════════════
-// WORKOUTS LIST
-// ═══════════════════════════════════════
 function renderWorkouts() {
   const el = document.getElementById('workouts-list');
   if (workouts.length === 0) {
@@ -981,11 +1041,10 @@ function renderWorkouts() {
       </div>`;
     return;
   }
-
   el.innerHTML = workouts.map(w => {
     const totalExercises = w.blocks.reduce((sum, b) => sum + b.exercises.length, 0);
     const modes = [...new Set(w.blocks.map(b => b.mode))];
-    const hasSuperset = w.blocks.some(b => b.superset);
+    const hasSS = w.blocks.some(b => b.exercises.some(e => e.ssId));
     return `
       <div class="card" onclick="startWorkout('${w.id}')">
         <div style="display:flex;align-items:flex-start;justify-content:space-between">
@@ -1000,15 +1059,12 @@ function renderWorkouts() {
         </div>
         <div class="card-meta">
           ${modes.map(m => `<span class="meta-tag accent">${m}</span>`).join('')}
-          ${hasSuperset ? '<span class="meta-tag accent">superset</span>' : ''}
+          ${hasSS ? '<span class="meta-tag accent">superset</span>' : ''}
         </div>
       </div>`;
   }).join('');
 }
 
-// ═══════════════════════════════════════
-// WORKOUT BUILDER
-// ═══════════════════════════════════════
 let builderBlocks = [];
 
 function openNewWorkout() {
@@ -1032,7 +1088,7 @@ function editWorkout(id) {
 }
 
 function addBlock() {
-  builderBlocks.push({ mode: 'strength', exercises: [], duration: 10, interval: 60, superset: false });
+  builderBlocks.push({ mode: 'strength', exercises: [], duration: 10, interval: 60 });
   renderBlocks();
 }
 
@@ -1041,18 +1097,8 @@ function renderBlocks() {
   container.innerHTML = builderBlocks.map((block, bi) => {
     let extraFields = '';
 
-    if (block.mode === 'strength' && block.exercises.length >= 2) {
-      extraFields += `
-        <div style="display:flex;align-items:center;gap:10px;margin-bottom:12px;padding:10px 14px;background:var(--surface-2);border-radius:var(--radius-sm)">
-          <label style="flex:1;font-size:13px;font-weight:600;color:${block.superset ? 'var(--accent)' : 'var(--text-secondary)'}">Superset</label>
-          <button onclick="toggleSuperset(${bi})" style="width:48px;height:28px;border-radius:14px;border:none;cursor:pointer;position:relative;background:${block.superset ? 'var(--accent)' : 'var(--surface-3)'};transition:background 0.2s">
-            <span style="position:absolute;top:2px;${block.superset ? 'right:2px' : 'left:2px'};width:24px;height:24px;border-radius:50%;background:${block.superset ? '#0A0A0A' : 'var(--text-muted)'};transition:all 0.2s"></span>
-          </button>
-        </div>`;
-    }
-
     if (block.mode === 'emom') {
-      extraFields += `
+      extraFields = `
         <div class="form-row" style="margin-bottom:12px">
           <div class="form-group" style="margin-bottom:0">
             <label class="form-label">Rounds</label>
@@ -1074,6 +1120,68 @@ function renderBlocks() {
         </div>`;
     }
 
+    let exercisesHtml = '';
+    if (block.mode === 'strength') {
+      const entries = getEntries(block);
+      exercisesHtml = entries.map(entry => {
+        if (entry.type === 'exercise') {
+          return `
+            <div class="exercise-item">
+              <span class="drag-handle">⠇</span>
+              <div class="exercise-info">
+                <div class="exercise-name">${esc(entry.ex.name)}</div>
+                <div class="exercise-detail">${exerciseDetail(entry.ex, 'strength')}</div>
+              </div>
+              <button class="remove-btn" onclick="removeExercise(${bi},${entry.idx})">×</button>
+            </div>`;
+        } else {
+          const labels = entry.exercises.map((_, i) => String.fromCharCode(65 + i));
+          const allSsIds = [...new Set(block.exercises.filter(e => e.ssId).map(e => e.ssId))];
+          const ssNum = allSsIds.indexOf(entry.ssId) + 1;
+
+          let innerHtml = entry.exercises.map((item, si) => `
+            ${si > 0 ? '<div class="ss-connector"></div>' : ''}
+            <div class="exercise-item">
+              <span class="ss-letter">${labels[si]}</span>
+              <div class="exercise-info">
+                <div class="exercise-name">${esc(item.ex.name)}</div>
+                <div class="exercise-detail">${exerciseDetail(item.ex, 'strength')}</div>
+              </div>
+              <button class="remove-btn" onclick="removeExercise(${bi},${item.idx})">×</button>
+            </div>
+          `).join('');
+
+          return `
+            <div class="superset-group">
+              <div class="superset-group-header">
+                <span class="superset-group-label">Superset ${ssNum}</span>
+                <button class="remove-btn" onclick="removeSupersetGroup(${bi},'${entry.ssId}')" style="font-size:16px">×</button>
+              </div>
+              ${innerHtml}
+              <button class="btn btn-secondary btn-sm" onclick="openAddExerciseToSuperset(${bi},'${entry.ssId}')" style="margin-top:8px;font-size:11px">+ Exercise to Superset</button>
+            </div>`;
+        }
+      }).join('');
+    } else {
+      exercisesHtml = block.exercises.map((ex, ei) => `
+        <div class="exercise-item">
+          <span class="drag-handle">⠇</span>
+          <div class="exercise-info">
+            <div class="exercise-name">${esc(ex.name)}</div>
+            <div class="exercise-detail">${exerciseDetail(ex, block.mode)}</div>
+          </div>
+          <button class="remove-btn" onclick="removeExercise(${bi},${ei})">×</button>
+        </div>
+      `).join('');
+    }
+
+    const buttons = block.mode === 'strength'
+      ? `<div style="display:flex;gap:8px;margin-top:8px">
+          <button class="btn btn-secondary btn-sm" onclick="openAddExercise(${bi})">+ Exercise</button>
+          <button class="btn btn-secondary btn-sm" onclick="addSupersetGroup(${bi})" style="border-color:var(--accent);color:var(--accent)">+ Superset</button>
+        </div>`
+      : `<button class="btn btn-secondary btn-sm" onclick="openAddExercise(${bi})" style="margin-top:8px">+ Exercise</button>`;
+
     return `
       <div style="margin-bottom:20px">
         <div class="block-header">
@@ -1087,19 +1195,8 @@ function renderBlocks() {
           <button class="mode-btn ${block.mode === 'amrap' ? 'active' : ''}" onclick="setBlockMode(${bi},'amrap')">AMRAP</button>
         </div>
         ${extraFields}
-        <div id="block-exercises-${bi}">
-          ${block.exercises.map((ex, ei) => `
-            <div class="exercise-item">
-              <span class="drag-handle">⠿</span>
-              <div class="exercise-info">
-                <div class="exercise-name">${esc(ex.name)}</div>
-                <div class="exercise-detail">${exerciseDetail(ex, block.mode)}</div>
-              </div>
-              <button class="remove-btn" onclick="removeExercise(${bi},${ei})">×</button>
-            </div>
-          `).join('')}
-        </div>
-        <button class="btn btn-secondary btn-sm" onclick="openAddExercise(${bi})" style="margin-top:8px">+ Exercise</button>
+        <div id="block-exercises-${bi}">${exercisesHtml}</div>
+        ${buttons}
       </div>`;
   }).join('');
 }
@@ -1108,7 +1205,7 @@ function exerciseDetail(ex, mode) {
   if (mode === 'strength') {
     let detail = `${ex.sets || 0} × ${ex.reps || 0}`;
     if (ex.weight) detail += ` · hint: ${ex.weight}kg`;
-    detail += ` · ${ex.rest || 0}s rest`;
+    if (ex.rest) detail += ` · ${ex.rest}s rest`;
     return detail;
   }
   if (mode === 'emom') return `${ex.reps || 0} reps/interval`;
@@ -1116,29 +1213,39 @@ function exerciseDetail(ex, mode) {
   return '';
 }
 
-function toggleSuperset(bi) {
-  builderBlocks[bi].superset = !builderBlocks[bi].superset;
-  renderBlocks();
-}
-
-function setBlockMode(bi, mode) {
-  builderBlocks[bi].mode = mode;
-  renderBlocks();
-}
-
-function removeBlock(bi) {
-  builderBlocks.splice(bi, 1);
-  renderBlocks();
-}
+function setBlockMode(bi, mode) { builderBlocks[bi].mode = mode; renderBlocks(); }
+function removeBlock(bi) { builderBlocks.splice(bi, 1); renderBlocks(); }
 
 function removeExercise(bi, ei) {
   builderBlocks[bi].exercises.splice(ei, 1);
   renderBlocks();
 }
 
+function removeSupersetGroup(bi, ssId) {
+  builderBlocks[bi].exercises = builderBlocks[bi].exercises.filter(e => e.ssId !== ssId);
+  renderBlocks();
+}
+
+function addSupersetGroup(bi) {
+  const ssId = uid();
+  currentBlockIndex = bi;
+  currentSupersetId = ssId;
+  openExerciseModal('strength');
+}
+
+function openAddExerciseToSuperset(bi, ssId) {
+  currentBlockIndex = bi;
+  currentSupersetId = ssId;
+  openExerciseModal('strength');
+}
+
 function openAddExercise(bi) {
   currentBlockIndex = bi;
-  const mode = builderBlocks[bi].mode;
+  currentSupersetId = null;
+  openExerciseModal(builderBlocks[bi].mode);
+}
+
+function openExerciseModal(mode) {
   document.getElementById('exercise-name').value = '';
   document.getElementById('exercise-sets').value = '';
   document.getElementById('exercise-reps').value = '';
@@ -1146,11 +1253,9 @@ function openAddExercise(bi) {
   document.getElementById('exercise-rest').value = '';
   document.getElementById('exercise-emom-reps').value = '';
   document.getElementById('exercise-amrap-reps').value = '';
-
   document.getElementById('exercise-fields-strength').style.display = mode === 'strength' ? '' : 'none';
   document.getElementById('exercise-fields-emom').style.display = mode === 'emom' ? '' : 'none';
   document.getElementById('exercise-fields-amrap').style.display = mode === 'amrap' ? '' : 'none';
-
   openModal('modal-exercise');
 }
 
@@ -1165,6 +1270,7 @@ function saveExercise() {
     ex.reps = +document.getElementById('exercise-reps').value || 10;
     ex.weight = +document.getElementById('exercise-weight').value || 0;
     ex.rest = +document.getElementById('exercise-rest').value || 60;
+    if (currentSupersetId) ex.ssId = currentSupersetId;
   } else if (mode === 'emom') {
     ex.reps = +document.getElementById('exercise-emom-reps').value || 10;
   } else if (mode === 'amrap') {
@@ -1183,14 +1289,10 @@ function saveWorkout() {
 
   if (editingWorkoutId) {
     const idx = workouts.findIndex(w => w.id === editingWorkoutId);
-    if (idx >= 0) {
-      workouts[idx].name = name;
-      workouts[idx].blocks = builderBlocks;
-    }
+    if (idx >= 0) { workouts[idx].name = name; workouts[idx].blocks = builderBlocks; }
   } else {
     workouts.push({ id: uid(), name, blocks: builderBlocks });
   }
-
   DB.set('workouts', workouts);
   closeModal('modal-workout');
   renderWorkouts();
@@ -1203,25 +1305,21 @@ function deleteWorkout(id) {
   renderWorkouts();
 }
 
-// ═══════════════════════════════════════
-// ACTIVE TRAINING SESSION
-// ═══════════════════════════════════════
 function startWorkout(id) {
   const template = workouts.find(w => w.id === id);
   if (!template) return;
-
   activeSession = {
     templateId: id,
     templateName: template.name,
     startedAt: new Date().toISOString(),
     blocks: JSON.parse(JSON.stringify(template.blocks)),
     currentBlock: 0,
-    currentExercise: 0,
+    currentEntry: 0,
     currentSet: 0,
     setLogs: [],
     amrapRounds: 0,
-    amrapReps: 0,
     emomCurrentRound: 0,
+    currentExercise: 0,
     supersetRound: 0,
     supersetExIndex: 0,
     timerRunning: false,
@@ -1229,7 +1327,6 @@ function startWorkout(id) {
     restSeconds: 0,
     isResting: false,
   };
-
   sessionStartTime = Date.now();
   switchTab('train');
   renderTrainView();
@@ -1265,24 +1362,16 @@ function updateTimers() {
     if (activeSession.timerSeconds <= 0) {
       activeSession.emomCurrentRound++;
       if (activeSession.emomCurrentRound >= (block.duration || 10)) {
-        activeSession.timerRunning = false;
-        vibrate();
-        nextBlock();
-        return;
+        activeSession.timerRunning = false; vibrate(); nextBlock(); return;
       }
       activeSession.timerSeconds = block.interval || 60;
       activeSession.currentExercise = activeSession.emomCurrentRound % block.exercises.length;
-      vibrate();
-      renderTrainView();
+      vibrate(); renderTrainView();
     }
   } else if (block.mode === 'amrap') {
     activeSession.timerSeconds -= 0.2;
     if (activeSession.timerSeconds <= 0) {
-      activeSession.timerSeconds = 0;
-      activeSession.timerRunning = false;
-      vibrate();
-      nextBlock();
-      return;
+      activeSession.timerSeconds = 0; activeSession.timerRunning = false; vibrate(); nextBlock(); return;
     }
   }
 }
@@ -1290,56 +1379,34 @@ function updateTimers() {
 function renderTrainView() {
   const el = document.getElementById('train-content');
   if (!activeSession) {
-    el.innerHTML = `
-      <div class="empty-state" style="padding-top:100px">
-        <div class="empty-icon">&#9201;</div>
-        <h3>Ready to Train</h3>
-        <p>Select a workout from the Workouts tab to begin.</p>
-      </div>`;
+    el.innerHTML = `<div class="empty-state" style="padding-top:100px"><div class="empty-icon">&#9201;</div><h3>Ready to Train</h3><p>Select a workout from the Workouts tab to begin.</p></div>`;
     return;
   }
-
   const block = activeSession.blocks[activeSession.currentBlock];
-  if (!block) {
-    renderWorkoutComplete();
-    return;
-  }
+  if (!block) { renderWorkoutComplete(); return; }
 
   const elapsed = sessionStartTime ? formatTime(Math.floor((Date.now() - sessionStartTime) / 1000)) : '00:00';
+  let content = `<div class="workout-active-header"><div class="workout-name">${esc(activeSession.templateName)}</div><div class="workout-elapsed">${elapsed} · Block ${activeSession.currentBlock + 1}/${activeSession.blocks.length}</div></div>`;
 
-  let content = `
-    <div class="workout-active-header">
-      <div class="workout-name">${esc(activeSession.templateName)}</div>
-      <div class="workout-elapsed">${elapsed} · Block ${activeSession.currentBlock + 1}/${activeSession.blocks.length}</div>
-    </div>`;
+  if (block.mode === 'strength') content += renderStrengthBlock(block);
+  else if (block.mode === 'emom') content += renderEmomBlock(block);
+  else if (block.mode === 'amrap') content += renderAmrapBlock(block);
 
-  if (block.mode === 'strength') {
-    content += renderStrengthBlock(block);
-  } else if (block.mode === 'emom') {
-    content += renderEmomBlock(block);
-  } else if (block.mode === 'amrap') {
-    content += renderAmrapBlock(block);
-  }
-
-  content += `
-    <div style="padding:16px;margin-top:auto">
-      <div style="display:flex;gap:10px">
-        ${activeSession.currentBlock < activeSession.blocks.length - 1 ?
-          `<button class="btn btn-secondary" onclick="nextBlock()">Skip Block ▸</button>` : ''}
-        <button class="btn btn-danger" onclick="finishWorkout()">End Workout</button>
-      </div>
-    </div>`;
-
+  content += `<div style="padding:16px;margin-top:auto"><div style="display:flex;gap:10px">
+    ${activeSession.currentBlock < activeSession.blocks.length - 1 ? `<button class="btn btn-secondary" onclick="nextBlock()">Skip Block ▸</button>` : ''}
+    <button class="btn btn-danger" onclick="finishWorkout()">End Workout</button></div></div>`;
   el.innerHTML = content;
 }
 
 function renderStrengthBlock(block) {
-  if (block.superset && block.exercises.length >= 2) {
-    return renderSupersetBlock(block);
-  }
+  const entries = getEntries(block);
+  const entry = entries[activeSession.currentEntry];
+  if (!entry) return '';
 
-  const ex = block.exercises[activeSession.currentExercise];
-  if (!ex) return '';
+  if (entry.type === 'superset') return renderSupersetEntry(block, entry, entries);
+
+  const ex = entry.ex;
+  const ei = entry.idx;
   const totalSets = ex.sets || 3;
   const lastWeight = getLastWeight(ex.name);
   const defaultWeight = lastWeight || ex.weight || '';
@@ -1347,52 +1414,37 @@ function renderStrengthBlock(block) {
 
   let setsHtml = '';
   for (let s = 0; s < totalSets; s++) {
-    const log = getSetLog(activeSession.currentBlock, activeSession.currentExercise, s);
+    const log = getSetLog(activeSession.currentBlock, ei, s);
     const isActive = s === activeSession.currentSet;
     const isDone = log && log.done;
-
     setsHtml += `
       <div class="set-row ${isActive ? 'active' : ''} ${isDone ? 'completed' : ''}">
         <div class="set-number">S${s + 1}</div>
         <div class="set-field">
           <input class="set-input" type="number" inputmode="decimal" value="${log ? log.weight : ''}"
-            onchange="updateSetLog(${activeSession.currentBlock},${activeSession.currentExercise},${s},'weight',+this.value)"
-            placeholder="${defaultWeight || '—'}">
+            onchange="updateSetLog(${activeSession.currentBlock},${ei},${s},'weight',+this.value)" placeholder="${defaultWeight || '—'}">
           <span class="set-input-label">kg</span>
         </div>
         <div class="set-field">
           <input class="set-input" type="number" inputmode="numeric" value="${log ? log.reps : ex.reps || ''}"
-            onchange="updateSetLog(${activeSession.currentBlock},${activeSession.currentExercise},${s},'reps',+this.value)"
-            placeholder="${ex.reps || '—'}">
+            onchange="updateSetLog(${activeSession.currentBlock},${ei},${s},'reps',+this.value)" placeholder="${ex.reps || '—'}">
           <span class="set-input-label">reps</span>
         </div>
-        <button class="set-check ${isDone ? 'done' : ''}" onclick="completeSet(${s})">✓</button>
+        <button class="set-check ${isDone ? 'done' : ''}" onclick="completeStandaloneSet(${s})">✓</button>
       </div>`;
   }
 
   const restDisplay = activeSession.isResting ?
-    `<div class="timer-display">
-      <div class="timer-value">${Math.ceil(activeSession.restSeconds)}</div>
-      <div class="timer-label">Rest</div>
+    `<div class="timer-display"><div class="timer-value">${Math.ceil(activeSession.restSeconds)}</div><div class="timer-label">Rest</div>
       <div class="timer-edit-row">
         <button class="btn btn-secondary btn-sm" style="width:auto;padding:6px 12px" onclick="adjustRest(-15)">−15s</button>
         <button class="btn btn-secondary btn-sm" style="width:auto;padding:6px 12px" onclick="adjustRest(15)">+15s</button>
         <button class="btn btn-primary btn-sm" style="width:auto;padding:6px 12px" onclick="skipRest()">Skip</button>
-      </div>
-    </div>` : '';
-
-  const exNav = block.exercises.length > 1 ? `
-    <div style="display:flex;gap:8px;padding:0 16px;margin-bottom:12px">
-      ${block.exercises.map((e, i) => `
-        <button class="mode-btn ${i === activeSession.currentExercise ? 'active' : ''}"
-          onclick="switchExercise(${i})" style="font-size:11px;padding:8px 4px">${esc(e.name)}</button>
-      `).join('')}
-    </div>` : '';
+      </div></div>` : '';
 
   return `
-    ${exNav}
     <div class="current-exercise">
-      <div class="exercise-label">Exercise ${activeSession.currentExercise + 1}/${block.exercises.length}</div>
+      <div class="exercise-label">Exercise ${activeSession.currentEntry + 1}/${entries.length}</div>
       <div class="exercise-title">${esc(ex.name)}</div>
       <div class="exercise-prescription">${totalSets} × ${ex.reps} · ${ex.rest || 60}s rest</div>
       ${lastWeightLabel ? `<div style="font-size:13px;color:var(--accent);margin-top:4px">${lastWeightLabel}</div>` : ''}
@@ -1401,68 +1453,68 @@ function renderStrengthBlock(block) {
     <div class="set-tracker">${setsHtml}</div>`;
 }
 
-function renderSupersetBlock(block) {
+function renderSupersetEntry(block, entry, entries) {
   const bi = activeSession.currentBlock;
-  const maxSets = Math.max(...block.exercises.map(e => e.sets || 3));
+  const ssExercises = entry.exercises;
+  const maxSets = Math.max(...ssExercises.map(e => e.ex.sets || 3));
   const currentRound = activeSession.supersetRound || 0;
   const currentExInRound = activeSession.supersetExIndex || 0;
-  const currentEx = block.exercises[currentExInRound];
-  const labels = block.exercises.length === 2 ? ['A', 'B'] : block.exercises.map((_, i) => String.fromCharCode(65 + i));
+  const currentEx = ssExercises[currentExInRound] ? ssExercises[currentExInRound].ex : ssExercises[0].ex;
+  const labels = ssExercises.map((_, i) => String.fromCharCode(65 + i));
 
   const restDisplay = activeSession.isResting ?
-    `<div class="timer-display">
-      <div class="timer-value">${Math.ceil(activeSession.restSeconds)}</div>
-      <div class="timer-label">Rest — then Round ${currentRound + 1 + 1}</div>
+    `<div class="timer-display"><div class="timer-value">${Math.ceil(activeSession.restSeconds)}</div>
+      <div class="timer-label">Rest — then Round ${currentRound + 2}</div>
       <div class="timer-edit-row">
         <button class="btn btn-secondary btn-sm" style="width:auto;padding:6px 12px" onclick="adjustRest(-15)">−15s</button>
         <button class="btn btn-secondary btn-sm" style="width:auto;padding:6px 12px" onclick="adjustRest(15)">+15s</button>
         <button class="btn btn-primary btn-sm" style="width:auto;padding:6px 12px" onclick="skipRest()">Skip</button>
-      </div>
-    </div>` : '';
+      </div></div>` : '';
 
   let roundsHtml = '';
   for (let r = 0; r < maxSets; r++) {
     const isCurrentRound = r === currentRound;
-    const roundDone = block.exercises.every((ex, ei) => {
-      if (r >= (ex.sets || 3)) return true;
-      const log = getSetLog(bi, ei, r);
+    const roundDone = ssExercises.every(item => {
+      if (r >= (item.ex.sets || 3)) return true;
+      const log = getSetLog(bi, item.idx, r);
       return log && log.done;
     });
 
     roundsHtml += `<div class="block-header"><span class="block-label" style="color:${roundDone ? 'var(--text-muted)' : isCurrentRound ? 'var(--accent)' : 'var(--text-secondary)'}">Round ${r + 1}</span><span class="block-line"></span></div>`;
 
-    block.exercises.forEach((ex, ei) => {
-      if (r >= (ex.sets || 3)) return;
-      const log = getSetLog(bi, ei, r);
+    ssExercises.forEach((item, si) => {
+      if (r >= (item.ex.sets || 3)) return;
+      const log = getSetLog(bi, item.idx, r);
       const isDone = log && log.done;
-      const isActive = isCurrentRound && ei === currentExInRound && !isDone;
-      const lw = getLastWeight(ex.name);
-      const placeholder = lw || ex.weight || '—';
+      const isActive = isCurrentRound && si === currentExInRound && !isDone;
+      const lw = getLastWeight(item.ex.name);
+      const placeholder = lw || item.ex.weight || '—';
 
       roundsHtml += `
-        <div class="set-row ${isActive ? 'active' : ''} ${isDone ? 'completed' : ''}" style="margin-bottom:4px">
-          <div class="set-number" style="width:40px">${labels[ei]}</div>
-          <div style="flex:1;font-size:13px;font-weight:600;${isDone ? 'text-decoration:line-through;opacity:0.5' : ''}">${esc(ex.name)}</div>
+        ${si > 0 ? '<div class="ss-connector" style="margin:2px 20px"></div>' : ''}
+        <div class="set-row ${isActive ? 'active' : ''} ${isDone ? 'completed' : ''}" style="margin-bottom:0">
+          <div class="set-number" style="width:40px">${labels[si]}</div>
+          <div style="flex:1;font-size:13px;font-weight:600;${isDone ? 'text-decoration:line-through;opacity:0.5' : ''}">${esc(item.ex.name)}</div>
           <div class="set-field">
             <input class="set-input" type="number" inputmode="decimal" value="${log ? log.weight : ''}"
-              onchange="updateSetLog(${bi},${ei},${r},'weight',+this.value)" placeholder="${placeholder}" style="width:56px">
+              onchange="updateSetLog(${bi},${item.idx},${r},'weight',+this.value)" placeholder="${placeholder}" style="width:56px">
             <span class="set-input-label">kg</span>
           </div>
           <div class="set-field">
-            <input class="set-input" type="number" inputmode="numeric" value="${log ? log.reps : ex.reps || ''}"
-              onchange="updateSetLog(${bi},${ei},${r},'reps',+this.value)" placeholder="${ex.reps || '—'}" style="width:56px">
+            <input class="set-input" type="number" inputmode="numeric" value="${log ? log.reps : item.ex.reps || ''}"
+              onchange="updateSetLog(${bi},${item.idx},${r},'reps',+this.value)" placeholder="${item.ex.reps || '—'}" style="width:56px">
             <span class="set-input-label">reps</span>
           </div>
-          <button class="set-check ${isDone ? 'done' : ''}" onclick="completeSupersetExercise(${r},${ei})">✓</button>
+          <button class="set-check ${isDone ? 'done' : ''}" onclick="completeSupersetExercise(${r},${si})">✓</button>
         </div>`;
     });
   }
 
   return `
     <div class="current-exercise">
-      <div class="exercise-label">Superset · Round ${currentRound + 1}/${maxSets}</div>
+      <div class="exercise-label">Superset · ${activeSession.currentEntry + 1}/${entries.length} · Round ${currentRound + 1}/${maxSets}</div>
       <div class="exercise-title">${labels[currentExInRound]}: ${esc(currentEx.name)}</div>
-      <div class="exercise-prescription">${block.exercises.map((e, i) => `${labels[i]}: ${e.reps} reps`).join(' · ')}</div>
+      <div class="exercise-prescription">${ssExercises.map((e, i) => `${labels[i]}: ${e.ex.reps} reps`).join(' · ')}</div>
     </div>
     ${restDisplay}
     <div class="set-tracker" style="padding:0 16px">${roundsHtml}</div>`;
@@ -1472,23 +1524,18 @@ function renderEmomBlock(block) {
   const totalRounds = block.duration || 10;
   const ex = block.exercises[activeSession.currentExercise] || block.exercises[0];
   const timeLeft = Math.max(0, Math.ceil(activeSession.timerSeconds));
-
   let dotsHtml = '';
   for (let i = 0; i < totalRounds; i++) {
     const cls = i < activeSession.emomCurrentRound ? 'done' : (i === activeSession.emomCurrentRound && activeSession.timerRunning ? 'active' : '');
     dotsHtml += `<div class="emom-dot ${cls}"></div>`;
   }
-
   return `
     <div class="current-exercise">
       <div class="exercise-label">EMOM · Round ${activeSession.emomCurrentRound + 1}/${totalRounds}</div>
       <div class="exercise-title">${esc(ex.name)}</div>
       <div class="exercise-prescription">${ex.reps || 0} reps</div>
     </div>
-    <div class="timer-display">
-      <div class="timer-value">${timeLeft}</div>
-      <div class="timer-label">Seconds remaining</div>
-    </div>
+    <div class="timer-display"><div class="timer-value">${timeLeft}</div><div class="timer-label">Seconds remaining</div></div>
     <div class="emom-progress">${dotsHtml}</div>
     <div class="timer-controls">
       ${!activeSession.timerRunning ?
@@ -1501,16 +1548,13 @@ function renderAmrapBlock(block) {
   const totalMin = block.duration || 10;
   const timeLeft = Math.max(0, Math.ceil(activeSession.timerSeconds));
   const exerciseList = block.exercises.map(e => `${e.reps} ${e.name}`).join(' + ');
-
   return `
     <div class="current-exercise">
       <div class="exercise-label">AMRAP · ${totalMin} Minutes</div>
       <div class="exercise-title">${exerciseList || 'No exercises'}</div>
     </div>
-    <div class="timer-display">
-      <div class="timer-value">${formatTime(timeLeft)}</div>
-      <div class="timer-label">${activeSession.timerRunning ? 'Time remaining' : 'Ready'}</div>
-    </div>
+    <div class="timer-display"><div class="timer-value">${formatTime(timeLeft)}</div>
+      <div class="timer-label">${activeSession.timerRunning ? 'Time remaining' : 'Ready'}</div></div>
     <div class="round-counter">
       <button onclick="adjustAmrap(-1)">−</button>
       <div class="round-value">${activeSession.amrapRounds}</div>
@@ -1528,20 +1572,15 @@ function renderTimerDisplay() {
   if (!activeSession) return;
   const block = activeSession.blocks[activeSession.currentBlock];
   if (!block) return;
-
   const elapsed = sessionStartTime ? formatTime(Math.floor((Date.now() - sessionStartTime) / 1000)) : '00:00';
   const elapsedEl = document.querySelector('.workout-elapsed');
   if (elapsedEl) elapsedEl.textContent = `${elapsed} · Block ${activeSession.currentBlock + 1}/${activeSession.blocks.length}`;
-
   const timerEl = document.querySelector('.timer-value');
   if (!timerEl) return;
-
   if (block.mode === 'strength' && activeSession.isResting) {
     timerEl.textContent = Math.ceil(activeSession.restSeconds);
   } else if (block.mode === 'emom') {
     timerEl.textContent = Math.max(0, Math.ceil(activeSession.timerSeconds));
-    const roundLabel = document.querySelector('.exercise-label');
-    if (roundLabel) roundLabel.textContent = `EMOM · Round ${activeSession.emomCurrentRound + 1}/${block.duration || 10}`;
   } else if (block.mode === 'amrap') {
     timerEl.textContent = formatTime(Math.max(0, Math.ceil(activeSession.timerSeconds)));
   }
@@ -1549,14 +1588,11 @@ function renderTimerDisplay() {
 
 function getLastWeight(exerciseName) {
   for (const h of history) {
-    for (const block of (h.blocks || [])) {
-      for (const ex of block.exercises) {
-        if (ex.name === exerciseName) {
-          const logs = (h.setLogs || []).filter(l => {
-            const bIdx = h.blocks.indexOf(block);
-            const eIdx = block.exercises.indexOf(ex);
-            return l.bi === bIdx && l.ei === eIdx && l.done && l.weight > 0;
-          });
+    for (let bIdx = 0; bIdx < (h.blocks || []).length; bIdx++) {
+      const block = h.blocks[bIdx];
+      for (let eIdx = 0; eIdx < block.exercises.length; eIdx++) {
+        if (block.exercises[eIdx].name === exerciseName) {
+          const logs = (h.setLogs || []).filter(l => l.bi === bIdx && l.ei === eIdx && l.done && l.weight > 0);
           if (logs.length > 0) return logs[0].weight;
         }
       }
@@ -1565,25 +1601,24 @@ function getLastWeight(exerciseName) {
   return null;
 }
 
-// Strength helpers
 function getSetLog(bi, ei, si) {
   return activeSession.setLogs.find(l => l.bi === bi && l.ei === ei && l.si === si);
 }
 
 function updateSetLog(bi, ei, si, field, value) {
   let log = getSetLog(bi, ei, si);
-  if (!log) {
-    log = { bi, ei, si, weight: 0, reps: 0, done: false };
-    activeSession.setLogs.push(log);
-  }
+  if (!log) { log = { bi, ei, si, weight: 0, reps: 0, done: false }; activeSession.setLogs.push(log); }
   log[field] = value;
 }
 
-function completeSet(si) {
+function completeStandaloneSet(si) {
   const bi = activeSession.currentBlock;
-  const ei = activeSession.currentExercise;
   const block = activeSession.blocks[bi];
-  const ex = block.exercises[ei];
+  const entries = getEntries(block);
+  const entry = entries[activeSession.currentEntry];
+  if (!entry || entry.type !== 'exercise') return;
+  const ei = entry.idx;
+  const ex = entry.ex;
 
   let log = getSetLog(bi, ei, si);
   if (!log) {
@@ -1596,30 +1631,27 @@ function completeSet(si) {
   if (log.done) {
     const allDone = Array.from({ length: ex.sets || 3 }, (_, i) => i)
       .every(i => { const l = getSetLog(bi, ei, i); return l && l.done; });
-
-    if (allDone) {
-      if (activeSession.currentExercise < block.exercises.length - 1) {
-        activeSession.currentExercise++;
-        activeSession.currentSet = 0;
-      } else {
-        nextBlock();
-        return;
-      }
-    } else {
+    if (allDone) { advanceEntry(); return; }
+    else {
       activeSession.currentSet = si + 1;
       activeSession.isResting = true;
       activeSession.restSeconds = ex.rest || 60;
       activeSession.timerRunning = true;
     }
   }
-
   renderTrainView();
 }
 
-function completeSupersetExercise(round, ei) {
+function completeSupersetExercise(round, subIdx) {
   const bi = activeSession.currentBlock;
   const block = activeSession.blocks[bi];
-  const ex = block.exercises[ei];
+  const entries = getEntries(block);
+  const entry = entries[activeSession.currentEntry];
+  if (!entry || entry.type !== 'superset') return;
+
+  const item = entry.exercises[subIdx];
+  const ei = item.idx;
+  const ex = item.ex;
 
   let log = getSetLog(bi, ei, round);
   if (!log) {
@@ -1630,132 +1662,96 @@ function completeSupersetExercise(round, ei) {
   log.done = !log.done;
 
   if (log.done) {
-    const maxSets = Math.max(...block.exercises.map(e => e.sets || 3));
-    const roundDone = block.exercises.every((e, i) => {
-      if (round >= (e.sets || 3)) return true;
-      const l = getSetLog(bi, i, round);
+    const maxSets = Math.max(...entry.exercises.map(e => e.ex.sets || 3));
+    const roundDone = entry.exercises.every(item2 => {
+      if (round >= (item2.ex.sets || 3)) return true;
+      const l = getSetLog(bi, item2.idx, round);
       return l && l.done;
     });
 
     if (roundDone) {
       const nextRound = round + 1;
-      if (nextRound >= maxSets) {
-        nextBlock();
-        return;
-      }
+      if (nextRound >= maxSets) { advanceEntry(); return; }
       activeSession.supersetRound = nextRound;
       activeSession.supersetExIndex = 0;
-      const lastEx = block.exercises[block.exercises.length - 1];
+      const lastEx = entry.exercises[entry.exercises.length - 1].ex;
       activeSession.isResting = true;
       activeSession.restSeconds = lastEx.rest || 60;
       activeSession.timerRunning = true;
     } else {
-      let nextEi = ei + 1;
-      while (nextEi < block.exercises.length && round >= (block.exercises[nextEi].sets || 3)) {
-        nextEi++;
-      }
-      if (nextEi < block.exercises.length) {
-        activeSession.supersetExIndex = nextEi;
-      }
+      let next = subIdx + 1;
+      while (next < entry.exercises.length && round >= (entry.exercises[next].ex.sets || 3)) next++;
+      if (next < entry.exercises.length) activeSession.supersetExIndex = next;
     }
   }
-
   renderTrainView();
 }
 
-function adjustRest(delta) {
-  activeSession.restSeconds = Math.max(0, activeSession.restSeconds + delta);
+function advanceEntry() {
+  const block = activeSession.blocks[activeSession.currentBlock];
+  const entries = getEntries(block);
+  if (activeSession.currentEntry < entries.length - 1) {
+    activeSession.currentEntry++;
+    activeSession.currentSet = 0;
+    activeSession.supersetRound = 0;
+    activeSession.supersetExIndex = 0;
+    activeSession.isResting = false;
+    activeSession.timerRunning = false;
+    renderTrainView();
+  } else {
+    nextBlock();
+  }
 }
+
+function adjustRest(delta) { activeSession.restSeconds = Math.max(0, activeSession.restSeconds + delta); }
 
 function skipRest() {
-  activeSession.isResting = false;
-  activeSession.timerRunning = false;
-  activeSession.restSeconds = 0;
+  activeSession.isResting = false; activeSession.timerRunning = false; activeSession.restSeconds = 0;
   renderTrainView();
 }
 
-function switchExercise(idx) {
-  activeSession.currentExercise = idx;
-  activeSession.currentSet = 0;
-  activeSession.isResting = false;
-  activeSession.timerRunning = false;
-  renderTrainView();
-}
-
-// EMOM helpers
 function startEmom() {
   const block = activeSession.blocks[activeSession.currentBlock];
   if (activeSession.timerSeconds <= 0) {
-    activeSession.timerSeconds = block.interval || 60;
-    activeSession.emomCurrentRound = 0;
-    activeSession.currentExercise = 0;
+    activeSession.timerSeconds = block.interval || 60; activeSession.emomCurrentRound = 0; activeSession.currentExercise = 0;
   }
-  activeSession.timerRunning = true;
-  renderTrainView();
+  activeSession.timerRunning = true; renderTrainView();
 }
 
-// AMRAP helpers
 function startAmrap() {
   const block = activeSession.blocks[activeSession.currentBlock];
-  if (activeSession.timerSeconds <= 0) {
-    activeSession.timerSeconds = (block.duration || 10) * 60;
-    activeSession.amrapRounds = 0;
-  }
-  activeSession.timerRunning = true;
-  renderTrainView();
+  if (activeSession.timerSeconds <= 0) { activeSession.timerSeconds = (block.duration || 10) * 60; activeSession.amrapRounds = 0; }
+  activeSession.timerRunning = true; renderTrainView();
 }
 
 function adjustAmrap(delta) {
   activeSession.amrapRounds = Math.max(0, activeSession.amrapRounds + delta);
-  const el = document.querySelector('.round-value');
-  if (el) el.textContent = activeSession.amrapRounds;
+  const el = document.querySelector('.round-value'); if (el) el.textContent = activeSession.amrapRounds;
 }
 
-function pauseTimer() {
-  activeSession.timerRunning = false;
-  renderTrainView();
-}
+function pauseTimer() { activeSession.timerRunning = false; renderTrainView(); }
 
 function nextBlock() {
   activeSession.currentBlock++;
-  activeSession.currentExercise = 0;
-  activeSession.currentSet = 0;
-  activeSession.timerRunning = false;
-  activeSession.timerSeconds = 0;
-  activeSession.isResting = false;
-  activeSession.emomCurrentRound = 0;
-  activeSession.amrapRounds = 0;
-  activeSession.supersetRound = 0;
-  activeSession.supersetExIndex = 0;
+  activeSession.currentEntry = 0; activeSession.currentExercise = 0;
+  activeSession.currentSet = 0; activeSession.timerRunning = false; activeSession.timerSeconds = 0;
+  activeSession.isResting = false; activeSession.emomCurrentRound = 0; activeSession.amrapRounds = 0;
+  activeSession.supersetRound = 0; activeSession.supersetExIndex = 0;
   renderTrainView();
 }
 
-// ═══════════════════════════════════════
-// WORKOUT COMPLETE
-// ═══════════════════════════════════════
 function renderWorkoutComplete() {
   const duration = sessionStartTime ? Math.floor((Date.now() - sessionStartTime) / 1000) : 0;
   const totalSets = activeSession.setLogs.filter(l => l.done).length;
   const totalVolume = activeSession.setLogs.filter(l => l.done).reduce((s, l) => s + (l.weight * l.reps), 0);
-
   document.getElementById('train-content').innerHTML = `
     <div class="workout-summary">
-      <div class="check-circle">✓</div>
-      <h2>Workout Complete</h2>
+      <div class="check-circle">✓</div><h2>Workout Complete</h2>
       <p style="color:var(--text-secondary)">${esc(activeSession.templateName)}</p>
       <div class="summary-stats">
-        <div class="summary-stat">
-          <div class="s-value">${formatTime(duration)}</div>
-          <div class="s-label">Duration</div>
-        </div>
-        <div class="summary-stat">
-          <div class="s-value">${totalSets}</div>
-          <div class="s-label">Sets</div>
-        </div>
-        <div class="summary-stat">
-          <div class="s-value">${totalVolume > 0 ? Math.round(totalVolume).toLocaleString() : '—'}</div>
-          <div class="s-label">Volume (kg)</div>
-        </div>
+        <div class="summary-stat"><div class="s-value">${formatTime(duration)}</div><div class="s-label">Duration</div></div>
+        <div class="summary-stat"><div class="s-value">${totalSets}</div><div class="s-label">Sets</div></div>
+        <div class="summary-stat"><div class="s-value">${totalVolume > 0 ? Math.round(totalVolume).toLocaleString() : '—'}</div><div class="s-label">Volume (kg)</div></div>
       </div>
       <button class="btn btn-primary" onclick="saveSession()">Save & Close</button>
     </div>`;
@@ -1769,69 +1765,38 @@ function finishWorkout() {
 
 function saveSession() {
   const duration = sessionStartTime ? Math.floor((Date.now() - sessionStartTime) / 1000) : 0;
-  const entry = {
-    id: uid(),
-    templateName: activeSession.templateName,
-    date: activeSession.startedAt,
-    duration,
-    blocks: activeSession.blocks,
-    setLogs: activeSession.setLogs,
-    amrapRounds: activeSession.amrapRounds,
-  };
-
-  history.unshift(entry);
+  history.unshift({
+    id: uid(), templateName: activeSession.templateName, date: activeSession.startedAt,
+    duration, blocks: activeSession.blocks, setLogs: activeSession.setLogs, amrapRounds: activeSession.amrapRounds,
+  });
   DB.set('history', history);
-
   if (timerInterval) clearInterval(timerInterval);
-  activeSession = null;
-  sessionStartTime = null;
+  activeSession = null; sessionStartTime = null;
   switchTab('history');
 }
 
-// ═══════════════════════════════════════
-// HISTORY
-// ═══════════════════════════════════════
 function renderHistory() {
   const el = document.getElementById('history-list');
   if (history.length === 0) {
-    el.innerHTML = `
-      <div class="empty-state">
-        <div class="empty-icon">&#128202;</div>
-        <h3>No History Yet</h3>
-        <p>Complete a workout to see it here.</p>
-      </div>`;
+    el.innerHTML = `<div class="empty-state"><div class="empty-icon">&#128202;</div><h3>No History Yet</h3><p>Complete a workout to see it here.</p></div>`;
     return;
   }
-
   let lastDate = '';
   el.innerHTML = history.map(h => {
     const d = new Date(h.date);
     const dateStr = d.toLocaleDateString('en-GB', { weekday: 'short', day: 'numeric', month: 'short' });
-    const showDate = dateStr !== lastDate;
-    lastDate = dateStr;
+    const showDate = dateStr !== lastDate; lastDate = dateStr;
     const totalSets = (h.setLogs || []).filter(l => l.done).length;
     const volume = (h.setLogs || []).filter(l => l.done).reduce((s, l) => s + (l.weight * l.reps), 0);
-
     return `
       ${showDate ? `<div class="history-date">${dateStr}</div>` : ''}
       <div class="card history-card" onclick="showHistoryDetail('${h.id}')">
         <div class="card-title">${esc(h.templateName)}</div>
         <div class="card-subtitle">${d.toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' })} · ${formatTime(h.duration || 0)}</div>
         <div class="history-stats">
-          <div class="history-stat">
-            <div class="stat-value">${totalSets}</div>
-            <div class="stat-label">Sets</div>
-          </div>
-          ${volume > 0 ? `
-          <div class="history-stat">
-            <div class="stat-value">${Math.round(volume).toLocaleString()}</div>
-            <div class="stat-label">Volume (kg)</div>
-          </div>` : ''}
-          ${h.amrapRounds ? `
-          <div class="history-stat">
-            <div class="stat-value">${h.amrapRounds}</div>
-            <div class="stat-label">Rounds</div>
-          </div>` : ''}
+          <div class="history-stat"><div class="stat-value">${totalSets}</div><div class="stat-label">Sets</div></div>
+          ${volume > 0 ? `<div class="history-stat"><div class="stat-value">${Math.round(volume).toLocaleString()}</div><div class="stat-label">Volume (kg)</div></div>` : ''}
+          ${h.amrapRounds ? `<div class="history-stat"><div class="stat-value">${h.amrapRounds}</div><div class="stat-label">Rounds</div></div>` : ''}
         </div>
       </div>`;
   }).join('');
@@ -1841,21 +1806,30 @@ function showHistoryDetail(id) {
   const h = history.find(x => x.id === id);
   if (!h) return;
   const logs = h.setLogs || [];
-
   let html = `<h2>${esc(h.templateName)}</h2>
     <p style="color:var(--text-secondary);margin-bottom:16px">${new Date(h.date).toLocaleDateString('en-GB', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' })} · ${formatTime(h.duration || 0)}</p>`;
 
   (h.blocks || []).forEach((block, bi) => {
     html += `<div class="block-header"><span class="block-label">${block.mode.toUpperCase()}</span><span class="block-line"></span></div>`;
-    block.exercises.forEach((ex, ei) => {
-      const exLogs = logs.filter(l => l.bi === bi && l.ei === ei && l.done);
-      html += `<div style="margin-bottom:12px"><div style="font-weight:700;margin-bottom:4px">${esc(ex.name)}</div>`;
-      if (exLogs.length > 0) {
-        html += exLogs.map(l => `<div style="font-size:13px;color:var(--text-secondary)">${l.weight}kg × ${l.reps}</div>`).join('');
-      } else if (block.mode === 'amrap' && h.amrapRounds) {
-        html += `<div style="font-size:13px;color:var(--text-secondary)">${h.amrapRounds} rounds</div>`;
+    const entries = getEntries(block);
+    entries.forEach(entry => {
+      if (entry.type === 'exercise') {
+        const exLogs = logs.filter(l => l.bi === bi && l.ei === entry.idx && l.done);
+        html += `<div style="margin-bottom:12px"><div style="font-weight:700;margin-bottom:4px">${esc(entry.ex.name)}</div>`;
+        if (exLogs.length > 0) html += exLogs.map(l => `<div style="font-size:13px;color:var(--text-secondary)">${l.weight}kg × ${l.reps}</div>`).join('');
+        else if (block.mode === 'amrap' && h.amrapRounds) html += `<div style="font-size:13px;color:var(--text-secondary)">${h.amrapRounds} rounds</div>`;
+        html += '</div>';
+      } else {
+        html += `<div style="border-left:2px solid var(--accent);padding-left:12px;margin-bottom:12px">`;
+        entry.exercises.forEach((item, si) => {
+          const label = String.fromCharCode(65 + si);
+          const exLogs = logs.filter(l => l.bi === bi && l.ei === item.idx && l.done);
+          html += `<div style="margin-bottom:8px"><div style="font-weight:700;margin-bottom:2px;color:var(--accent)">${label}: ${esc(item.ex.name)}</div>`;
+          if (exLogs.length > 0) html += exLogs.map(l => `<div style="font-size:13px;color:var(--text-secondary)">${l.weight}kg × ${l.reps}</div>`).join('');
+          html += '</div>';
+        });
+        html += '</div>';
       }
-      html += '</div>';
     });
   });
 
@@ -1863,24 +1837,20 @@ function showHistoryDetail(id) {
   openModal('modal-history-detail');
 }
 
-// ═══════════════════════════════════════
-// EXPORT
-// ═══════════════════════════════════════
 function exportCSV() {
-  let csv = 'Date,Workout,Exercise,Set,Weight (kg),Reps,Mode\n';
+  let csv = 'Date,Workout,Exercise,Set,Weight (kg),Reps,Mode,Superset\n';
   history.forEach(h => {
     const date = new Date(h.date).toISOString().split('T')[0];
     (h.blocks || []).forEach((block, bi) => {
       block.exercises.forEach((ex, ei) => {
-        const logs = (h.setLogs || []).filter(l => l.bi === bi && l.ei === ei && l.done);
-        if (logs.length > 0) {
-          logs.forEach(l => {
-            csv += `${date},${csvEsc(h.templateName)},${csvEsc(ex.name)},${l.si + 1},${l.weight},${l.reps},${block.mode}\n`;
-          });
+        const eLogs = (h.setLogs || []).filter(l => l.bi === bi && l.ei === ei && l.done);
+        const ssLabel = ex.ssId ? 'yes' : '';
+        if (eLogs.length > 0) {
+          eLogs.forEach(l => { csv += `${date},${csvEsc(h.templateName)},${csvEsc(ex.name)},${l.si + 1},${l.weight},${l.reps},${block.mode},${ssLabel}\n`; });
         } else if (block.mode === 'amrap') {
-          csv += `${date},${csvEsc(h.templateName)},${csvEsc(ex.name)},,,,amrap (${h.amrapRounds || 0} rounds)\n`;
+          csv += `${date},${csvEsc(h.templateName)},${csvEsc(ex.name)},,,,amrap (${h.amrapRounds || 0} rounds),${ssLabel}\n`;
         } else if (block.mode === 'emom') {
-          csv += `${date},${csvEsc(h.templateName)},${csvEsc(ex.name)},,,${ex.reps || ''},emom\n`;
+          csv += `${date},${csvEsc(h.templateName)},${csvEsc(ex.name)},,,${ex.reps || ''},emom,${ssLabel}\n`;
         }
       });
     });
@@ -1888,69 +1858,30 @@ function exportCSV() {
   download('rxlog_history.csv', csv, 'text/csv');
 }
 
-function exportJSON() {
-  download('rxlog_history.json', JSON.stringify(history, null, 2), 'application/json');
-}
-
-function exportTemplates() {
-  download('rxlog_templates.json', JSON.stringify(workouts, null, 2), 'application/json');
-}
+function exportJSON() { download('rxlog_history.json', JSON.stringify(history, null, 2), 'application/json'); }
+function exportTemplates() { download('rxlog_templates.json', JSON.stringify(workouts, null, 2), 'application/json'); }
 
 function importTemplates(event) {
-  const file = event.target.files[0];
-  if (!file) return;
+  const file = event.target.files[0]; if (!file) return;
   const reader = new FileReader();
   reader.onload = e => {
     try {
       const imported = JSON.parse(e.target.result);
-      if (Array.isArray(imported)) {
-        imported.forEach(w => { w.id = uid(); workouts.push(w); });
-        DB.set('workouts', workouts);
-        renderWorkouts();
-        alert(`Imported ${imported.length} workout(s)`);
-      }
+      if (Array.isArray(imported)) { imported.forEach(w => { w.id = uid(); workouts.push(w); }); DB.set('workouts', workouts); renderWorkouts(); alert(`Imported ${imported.length} workout(s)`); }
     } catch { alert('Invalid file'); }
   };
-  reader.readAsText(file);
-  event.target.value = '';
+  reader.readAsText(file); event.target.value = '';
 }
 
-// ═══════════════════════════════════════
-// UTILITIES
-// ═══════════════════════════════════════
 function uid() { return Math.random().toString(36).slice(2, 10); }
 function esc(s) { const d = document.createElement('div'); d.textContent = s || ''; return d.innerHTML; }
 function csvEsc(s) { return '"' + (s || '').replace(/"/g, '""') + '"'; }
+function formatTime(sec) { const m = Math.floor(sec / 60); const s = sec % 60; return `${m.toString().padStart(2,'0')}:${Math.floor(s).toString().padStart(2,'0')}`; }
+function vibrate() { if (navigator.vibrate) navigator.vibrate(200); }
+function openModal(id) { document.getElementById(id).classList.add('active'); }
+function closeModal(id) { document.getElementById(id).classList.remove('active'); }
+function download(filename, content, mime) { const blob = new Blob([content], { type: mime }); const url = URL.createObjectURL(blob); const a = document.createElement('a'); a.href = url; a.download = filename; a.click(); URL.revokeObjectURL(url); }
 
-function formatTime(sec) {
-  const m = Math.floor(sec / 60);
-  const s = sec % 60;
-  return `${m.toString().padStart(2,'0')}:${Math.floor(s).toString().padStart(2,'0')}`;
-}
-
-function vibrate() {
-  if (navigator.vibrate) navigator.vibrate(200);
-}
-
-function openModal(id) {
-  document.getElementById(id).classList.add('active');
-}
-
-function closeModal(id) {
-  document.getElementById(id).classList.remove('active');
-}
-
-function download(filename, content, mime) {
-  const blob = new Blob([content], { type: mime });
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement('a');
-  a.href = url;
-  a.download = filename;
-  a.click();
-  URL.revokeObjectURL(url);
-}
-
-// Init
 renderWorkouts();
 </script>
 </body>
