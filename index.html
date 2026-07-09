@@ -821,6 +821,102 @@ input[type="number"] { -moz-appearance: textfield; }
   text-transform: uppercase;
   letter-spacing: 0.5px;
 }
+
+/* ── AUTOCOMPLETE ── */
+.autocomplete-wrap {
+  position: relative;
+}
+
+.autocomplete-list {
+  position: absolute;
+  top: 100%;
+  left: 0;
+  right: 0;
+  background: var(--surface-2);
+  border: 1px solid var(--surface-3);
+  border-top: none;
+  border-radius: 0 0 var(--radius-sm) var(--radius-sm);
+  max-height: 180px;
+  overflow-y: auto;
+  z-index: 300;
+  display: none;
+}
+
+.autocomplete-list.visible { display: block; }
+
+.autocomplete-item {
+  padding: 12px 16px;
+  font-size: 15px;
+  color: var(--text);
+  cursor: pointer;
+  border-bottom: 1px solid var(--surface-3);
+}
+
+.autocomplete-item:last-child { border-bottom: none; }
+
+.autocomplete-item:active,
+.autocomplete-item.highlighted {
+  background: var(--accent-bg);
+  color: var(--accent);
+}
+
+.autocomplete-item .ac-category {
+  font-size: 11px;
+  color: var(--text-muted);
+  margin-left: 8px;
+}
+
+.autocomplete-item.ac-add {
+  color: var(--accent);
+  font-weight: 600;
+}
+
+/* ── EXERCISE LIBRARY ── */
+.exercise-lib-item {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 14px 16px;
+  background: var(--surface);
+  border-radius: var(--radius-sm);
+  margin-bottom: 8px;
+}
+
+.exercise-lib-item .lib-name {
+  flex: 1;
+  font-size: 15px;
+  font-weight: 600;
+}
+
+.exercise-lib-item .lib-category {
+  font-size: 11px;
+  color: var(--text-secondary);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  background: var(--surface-2);
+  padding: 4px 8px;
+  border-radius: 6px;
+}
+
+.exercise-lib-item .lib-actions {
+  display: flex;
+  gap: 4px;
+}
+
+.exercise-lib-item .lib-actions button {
+  background: none;
+  border: none;
+  color: var(--text-muted);
+  font-size: 16px;
+  padding: 4px;
+  cursor: pointer;
+}
+
+.exercise-lib-item .lib-actions button:active { color: var(--danger); }
+
+.lib-search {
+  margin-bottom: 16px;
+}
 </style>
 </head>
 <body>
@@ -844,6 +940,18 @@ input[type="number"] { -moz-appearance: textfield; }
     <h1>History</h1>
   </div>
   <div class="view-content" id="history-list"></div>
+</div>
+
+<!-- ════════════ EXERCISES VIEW ════════════ -->
+<div id="view-exercises" class="view">
+  <div class="view-header">
+    <h1>Exercises</h1>
+  </div>
+  <div class="view-content">
+    <input class="form-input lib-search" id="exercise-lib-search" placeholder="Search exercises…" oninput="renderExerciseLibrary()">
+    <div id="exercise-lib-list"></div>
+    <button class="btn btn-secondary" onclick="openAddLibraryExercise()" style="margin-top:8px">+ New Exercise</button>
+  </div>
 </div>
 
 <!-- ════════════ EXPORT VIEW ════════════ -->
@@ -889,6 +997,10 @@ input[type="number"] { -moz-appearance: textfield; }
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 3v18h18"/><polyline points="7 14 11 10 15 13 21 7"/></svg>
     History
   </button>
+  <button onclick="switchTab('exercises')" data-tab="exercises">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M6.5 6.5a2 2 0 013 0V12a2 2 0 01-3 0z"/><path d="M14.5 6.5a2 2 0 013 0V12a2 2 0 01-3 0z"/><line x1="9.5" y1="9" x2="14.5" y2="9"/></svg>
+    Exercises
+  </button>
   <button onclick="switchTab('export')" data-tab="export">
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
     Export
@@ -923,9 +1035,11 @@ input[type="number"] { -moz-appearance: textfield; }
     <div class="modal-handle"></div>
     <h2>Add Exercise</h2>
 
-    <div class="form-group">
+    <div class="form-group autocomplete-wrap">
       <label class="form-label">Exercise Name</label>
-      <input class="form-input" id="exercise-name" placeholder="e.g. Back Squat">
+      <input class="form-input" id="exercise-name" placeholder="e.g. Back Squat" autocomplete="off"
+        oninput="onExerciseNameInput()" onfocus="onExerciseNameInput()">
+      <div class="autocomplete-list" id="exercise-ac-list"></div>
     </div>
 
     <div id="exercise-fields-strength">
@@ -941,7 +1055,7 @@ input[type="number"] { -moz-appearance: textfield; }
       </div>
       <div class="form-row">
         <div class="form-group">
-          <label class="form-label">Weight hint (optional)</label>
+          <label class="form-label" id="exercise-weight-label">Weight hint (optional)</label>
           <input class="form-input" id="exercise-weight" type="number" placeholder="e.g. 80" inputmode="decimal">
         </div>
         <div class="form-group">
@@ -972,6 +1086,34 @@ input[type="number"] { -moz-appearance: textfield; }
   </div>
 </div>
 
+<!-- ════════════ MODAL: LIBRARY EXERCISE ════════════ -->
+<div class="modal-overlay" id="modal-lib-exercise">
+  <div class="modal">
+    <div class="modal-handle"></div>
+    <h2 id="modal-lib-exercise-title">New Exercise</h2>
+    <div class="form-group">
+      <label class="form-label">Exercise Name</label>
+      <input class="form-input" id="lib-exercise-name" placeholder="e.g. Back Squat">
+    </div>
+    <div class="form-group">
+      <label class="form-label">Category (optional)</label>
+      <input class="form-input" id="lib-exercise-category" placeholder="e.g. Chest, Back, Legs">
+    </div>
+    <div class="form-group">
+      <label class="form-label">Measure</label>
+      <div class="mode-tabs" id="lib-exercise-measure">
+        <button class="mode-tab active" onclick="setLibMeasure('weight')">Weight</button>
+        <button class="mode-tab" onclick="setLibMeasure('time')">Time</button>
+        <button class="mode-tab" onclick="setLibMeasure('distance')">Distance</button>
+      </div>
+    </div>
+    <div style="display:flex;gap:10px;margin-top:8px">
+      <button class="btn btn-primary" onclick="saveLibraryExercise()" style="flex:2">Save</button>
+      <button class="btn btn-danger btn-sm" onclick="closeModal('modal-lib-exercise')" style="flex:1">Cancel</button>
+    </div>
+  </div>
+</div>
+
 <!-- ════════════ MODAL: HISTORY DETAIL ════════════ -->
 <div class="modal-overlay" id="modal-history-detail">
   <div class="modal">
@@ -992,12 +1134,195 @@ const DB = {
 
 let workouts = DB.get('workouts', []);
 let history = DB.get('history', []);
+let exerciseLibrary = DB.get('exerciseLibrary', []);
 let activeSession = null;
 let timerInterval = null;
 let sessionStartTime = null;
 let editingWorkoutId = null;
 let currentBlockIndex = null;
 let currentSupersetId = null;
+let editingLibExerciseId = null;
+
+// Bootstrap library from existing workouts/history if empty
+if (exerciseLibrary.length === 0) {
+  const names = new Set();
+  workouts.forEach(w => w.blocks.forEach(b => b.exercises.forEach(e => names.add(e.name))));
+  history.forEach(h => (h.blocks || []).forEach(b => b.exercises.forEach(e => names.add(e.name))));
+  names.forEach(name => { if (name) exerciseLibrary.push({ id: uid(), name, category: '' }); });
+  if (exerciseLibrary.length > 0) DB.set('exerciseLibrary', exerciseLibrary);
+}
+
+function ensureInLibrary(name) {
+  if (!name) return;
+  const exists = exerciseLibrary.some(e => e.name.toLowerCase() === name.toLowerCase());
+  if (!exists) {
+    exerciseLibrary.push({ id: uid(), name, category: '' });
+    DB.set('exerciseLibrary', exerciseLibrary);
+  }
+}
+
+function renderExerciseLibrary() {
+  const el = document.getElementById('exercise-lib-list');
+  if (!el) return;
+  const query = (document.getElementById('exercise-lib-search')?.value || '').toLowerCase();
+  const filtered = exerciseLibrary.filter(e => !query || e.name.toLowerCase().includes(query));
+  filtered.sort((a, b) => a.name.localeCompare(b.name));
+
+  if (filtered.length === 0) {
+    el.innerHTML = `<div class="empty-state" style="padding:32px"><p>${query ? 'No matches' : 'No exercises yet. Add one or build a workout.'}</p></div>`;
+    return;
+  }
+
+  el.innerHTML = filtered.map(e => `
+    <div class="exercise-lib-item">
+      <div class="lib-name">${esc(e.name)}</div>
+      <div style="display:flex;align-items:center;gap:6px">
+        ${e.measure === 'time' ? '<span class="lib-category">Time</span>' : e.measure === 'distance' ? '<span class="lib-category">Distance</span>' : ''}
+        ${e.category ? `<span class="lib-category">${esc(e.category)}</span>` : ''}
+      </div>
+      <div class="lib-actions">
+        <button onclick="editLibraryExercise('${e.id}')">✎</button>
+        <button onclick="deleteLibraryExercise('${e.id}')">×</button>
+      </div>
+    </div>
+  `).join('');
+}
+
+let libMeasure = 'weight';
+
+function setLibMeasure(m) {
+  libMeasure = m;
+  document.querySelectorAll('#lib-exercise-measure .mode-tab').forEach(b => {
+    b.classList.toggle('active', b.textContent.toLowerCase().includes(m));
+  });
+}
+
+function getExerciseMeasure(name) {
+  const lib = exerciseLibrary.find(e => e.name.toLowerCase() === (name || '').toLowerCase());
+  return (lib && lib.measure) || 'weight';
+}
+
+function formatDuration(sec) {
+  if (!sec) return '0:00';
+  const m = Math.floor(sec / 60);
+  const s = sec % 60;
+  return `${m}:${s.toString().padStart(2, '0')}`;
+}
+
+function openAddLibraryExercise() {
+  editingLibExerciseId = null;
+  document.getElementById('modal-lib-exercise-title').textContent = 'New Exercise';
+  document.getElementById('lib-exercise-name').value = '';
+  document.getElementById('lib-exercise-category').value = '';
+  setLibMeasure('weight');
+  openModal('modal-lib-exercise');
+}
+
+function editLibraryExercise(id) {
+  const ex = exerciseLibrary.find(e => e.id === id);
+  if (!ex) return;
+  editingLibExerciseId = id;
+  document.getElementById('modal-lib-exercise-title').textContent = 'Edit Exercise';
+  document.getElementById('lib-exercise-name').value = ex.name;
+  document.getElementById('lib-exercise-category').value = ex.category || '';
+  setLibMeasure(ex.measure || 'weight');
+  openModal('modal-lib-exercise');
+}
+
+function saveLibraryExercise() {
+  const name = document.getElementById('lib-exercise-name').value.trim();
+  if (!name) return;
+  const category = document.getElementById('lib-exercise-category').value.trim();
+
+  if (editingLibExerciseId) {
+    const ex = exerciseLibrary.find(e => e.id === editingLibExerciseId);
+    if (ex) {
+      const oldName = ex.name;
+      ex.name = name;
+      ex.category = category;
+      ex.measure = libMeasure;
+      if (oldName !== name) {
+        workouts.forEach(w => w.blocks.forEach(b => b.exercises.forEach(e => { if (e.name === oldName) e.name = name; })));
+        DB.set('workouts', workouts);
+      }
+    }
+  } else {
+    const dupe = exerciseLibrary.some(e => e.name.toLowerCase() === name.toLowerCase());
+    if (dupe) { closeModal('modal-lib-exercise'); return; }
+    exerciseLibrary.push({ id: uid(), name, category, measure: libMeasure });
+  }
+
+  DB.set('exerciseLibrary', exerciseLibrary);
+  closeModal('modal-lib-exercise');
+  renderExerciseLibrary();
+}
+
+function deleteLibraryExercise(id) {
+  if (!confirm('Remove from library? This won\'t affect saved workouts.')) return;
+  exerciseLibrary = exerciseLibrary.filter(e => e.id !== id);
+  DB.set('exerciseLibrary', exerciseLibrary);
+  renderExerciseLibrary();
+}
+
+// Autocomplete for exercise name in workout builder
+function onExerciseNameInput() {
+  const input = document.getElementById('exercise-name');
+  const list = document.getElementById('exercise-ac-list');
+  const query = input.value.trim().toLowerCase();
+
+  if (!query) { list.classList.remove('visible'); return; }
+
+  const matches = exerciseLibrary
+    .filter(e => e.name.toLowerCase().includes(query))
+    .sort((a, b) => {
+      const aStarts = a.name.toLowerCase().startsWith(query) ? 0 : 1;
+      const bStarts = b.name.toLowerCase().startsWith(query) ? 0 : 1;
+      return aStarts - bStarts || a.name.localeCompare(b.name);
+    })
+    .slice(0, 8);
+
+  const exactMatch = matches.some(e => e.name.toLowerCase() === query);
+
+  let html = matches.map(e =>
+    `<div class="autocomplete-item" onmousedown="selectExerciseAc('${esc(e.name).replace(/'/g, "\\'")}')">
+      ${esc(e.name)}${e.category ? `<span class="ac-category">${esc(e.category)}</span>` : ''}
+    </div>`
+  ).join('');
+
+  if (!exactMatch && query.length > 0) {
+    html += `<div class="autocomplete-item ac-add" onmousedown="selectExerciseAc('${esc(input.value.trim()).replace(/'/g, "\\'")}')">+ Add "${esc(input.value.trim())}"</div>`;
+  }
+
+  list.innerHTML = html;
+  list.classList.toggle('visible', html.length > 0);
+}
+
+function selectExerciseAc(name) {
+  document.getElementById('exercise-name').value = name;
+  document.getElementById('exercise-ac-list').classList.remove('visible');
+  applyMeasureToBuilder(name);
+}
+
+function applyMeasureToBuilder(name) {
+  const measure = getExerciseMeasure(name);
+  const label = document.getElementById('exercise-weight-label');
+  const input = document.getElementById('exercise-weight');
+  if (measure === 'time') {
+    label.textContent = 'Duration (seconds)';
+    input.placeholder = 'e.g. 120';
+  } else if (measure === 'distance') {
+    label.textContent = 'Distance (metres)';
+    input.placeholder = 'e.g. 20';
+  } else {
+    label.textContent = 'Weight hint (optional)';
+    input.placeholder = 'e.g. 80';
+  }
+}
+
+document.addEventListener('click', e => {
+  const list = document.getElementById('exercise-ac-list');
+  if (list && !e.target.closest('.autocomplete-wrap')) list.classList.remove('visible');
+});
 
 function getEntries(block) {
   if (block.mode !== 'strength') return block.exercises.map((ex, i) => ({ type: 'exercise', ex, idx: i }));
@@ -1027,6 +1352,7 @@ function switchTab(name) {
   fab.className = 'fab' + (name !== 'workouts' ? ' hidden' : '');
   if (name === 'history') renderHistory();
   if (name === 'workouts') renderWorkouts();
+  if (name === 'exercises') renderExerciseLibrary();
 }
 
 function renderWorkouts() {
@@ -1053,6 +1379,7 @@ function renderWorkouts() {
             <div class="card-subtitle">${totalExercises} exercise${totalExercises !== 1 ? 's' : ''} · ${w.blocks.length} block${w.blocks.length !== 1 ? 's' : ''}</div>
           </div>
           <div style="display:flex;gap:6px">
+            <button class="btn-ghost btn-sm" onclick="event.stopPropagation();duplicateWorkout('${w.id}')" style="font-size:14px;padding:6px"><svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><rect x="5" y="5" width="9" height="9" rx="1.5"/><path d="M11 5V3.5A1.5 1.5 0 009.5 2h-6A1.5 1.5 0 002 3.5v6A1.5 1.5 0 003.5 11H5"/></svg></button>
             <button class="btn-ghost btn-sm" onclick="event.stopPropagation();editWorkout('${w.id}')" style="font-size:16px;padding:6px">&#9998;</button>
             <button class="btn-ghost btn-sm" onclick="event.stopPropagation();deleteWorkout('${w.id}')" style="font-size:16px;padding:6px;color:var(--danger)">&#10005;</button>
           </div>
@@ -1204,7 +1531,10 @@ function renderBlocks() {
 function exerciseDetail(ex, mode) {
   if (mode === 'strength') {
     let detail = `${ex.sets || 0} × ${ex.reps || 0}`;
-    if (ex.weight) detail += ` · hint: ${ex.weight}kg`;
+    if (ex.weight) {
+      const m = getExerciseMeasure(ex.name);
+      detail += ` · hint: ${m === 'time' ? formatDuration(ex.weight) : ex.weight + (m === 'distance' ? 'm' : 'kg')}`;
+    }
     if (ex.rest) detail += ` · ${ex.rest}s rest`;
     return detail;
   }
@@ -1256,6 +1586,8 @@ function openExerciseModal(mode) {
   document.getElementById('exercise-fields-strength').style.display = mode === 'strength' ? '' : 'none';
   document.getElementById('exercise-fields-emom').style.display = mode === 'emom' ? '' : 'none';
   document.getElementById('exercise-fields-amrap').style.display = mode === 'amrap' ? '' : 'none';
+  document.getElementById('exercise-weight-label').textContent = 'Weight hint (optional)';
+  document.getElementById('exercise-weight').placeholder = 'e.g. 80';
   openModal('modal-exercise');
 }
 
@@ -1278,6 +1610,7 @@ function saveExercise() {
   }
 
   builderBlocks[currentBlockIndex].exercises.push(ex);
+  ensureInLibrary(name);
   closeModal('modal-exercise');
   renderBlocks();
 }
@@ -1295,6 +1628,17 @@ function saveWorkout() {
   }
   DB.set('workouts', workouts);
   closeModal('modal-workout');
+  renderWorkouts();
+}
+
+function duplicateWorkout(id) {
+  const src = workouts.find(w => w.id === id);
+  if (!src) return;
+  const clone = JSON.parse(JSON.stringify(src));
+  clone.id = uid();
+  clone.name = src.name + ' (Copy)';
+  workouts.push(clone);
+  DB.set('workouts', workouts);
   renderWorkouts();
 }
 
@@ -1408,9 +1752,16 @@ function renderStrengthBlock(block) {
   const ex = entry.ex;
   const ei = entry.idx;
   const totalSets = ex.sets || 3;
+  const measure = getExerciseMeasure(ex.name);
+  const isTime = measure === 'time';
+  const isDist = measure === 'distance';
+  const mUnit = isTime ? 'sec' : isDist ? 'm' : 'kg';
   const lastWeight = getLastWeight(ex.name);
   const defaultWeight = lastWeight || ex.weight || '';
-  const lastWeightLabel = lastWeight ? `Last: ${lastWeight}kg` : (ex.weight ? `Hint: ${ex.weight}kg` : '');
+  const fmtVal = v => isTime ? formatDuration(v) : v + mUnit;
+  const lastWeightLabel = lastWeight
+    ? `Last: ${fmtVal(lastWeight)}`
+    : (ex.weight ? `Hint: ${fmtVal(ex.weight)}` : '');
 
   let setsHtml = '';
   for (let s = 0; s < totalSets; s++) {
@@ -1423,12 +1774,12 @@ function renderStrengthBlock(block) {
         <div class="set-field">
           <input class="set-input" type="number" inputmode="decimal" value="${log ? log.weight : ''}"
             onchange="updateSetLog(${activeSession.currentBlock},${ei},${s},'weight',+this.value)" placeholder="${defaultWeight || '—'}">
-          <span class="set-input-label">kg</span>
+          <span class="set-input-label">${mUnit}</span>
         </div>
         <div class="set-field">
           <input class="set-input" type="number" inputmode="numeric" value="${log ? log.reps : ex.reps || ''}"
             onchange="updateSetLog(${activeSession.currentBlock},${ei},${s},'reps',+this.value)" placeholder="${ex.reps || '—'}">
-          <span class="set-input-label">reps</span>
+          <span class="set-input-label">${isTime ? 'rounds' : 'reps'}</span>
         </div>
         <button class="set-check ${isDone ? 'done' : ''}" onclick="completeStandaloneSet(${s})">✓</button>
       </div>`;
@@ -1489,6 +1840,10 @@ function renderSupersetEntry(block, entry, entries) {
       const isActive = isCurrentRound && si === currentExInRound && !isDone;
       const lw = getLastWeight(item.ex.name);
       const placeholder = lw || item.ex.weight || '—';
+      const itemMeasure = getExerciseMeasure(item.ex.name);
+      const itemIsTime = itemMeasure === 'time';
+      const itemIsDist = itemMeasure === 'distance';
+      const itemUnit = itemIsTime ? 'sec' : itemIsDist ? 'm' : 'kg';
 
       roundsHtml += `
         ${si > 0 ? '<div class="ss-connector" style="margin:2px 20px"></div>' : ''}
@@ -1498,12 +1853,12 @@ function renderSupersetEntry(block, entry, entries) {
           <div class="set-field">
             <input class="set-input" type="number" inputmode="decimal" value="${log ? log.weight : ''}"
               onchange="updateSetLog(${bi},${item.idx},${r},'weight',+this.value)" placeholder="${placeholder}" style="width:56px">
-            <span class="set-input-label">kg</span>
+            <span class="set-input-label">${itemUnit}</span>
           </div>
           <div class="set-field">
             <input class="set-input" type="number" inputmode="numeric" value="${log ? log.reps : item.ex.reps || ''}"
               onchange="updateSetLog(${bi},${item.idx},${r},'reps',+this.value)" placeholder="${item.ex.reps || '—'}" style="width:56px">
-            <span class="set-input-label">reps</span>
+            <span class="set-input-label">${itemIsTime ? 'rounds' : 'reps'}</span>
           </div>
           <button class="set-check ${isDone ? 'done' : ''}" onclick="completeSupersetExercise(${r},${si})">✓</button>
         </div>`;
@@ -1816,7 +2171,11 @@ function showHistoryDetail(id) {
       if (entry.type === 'exercise') {
         const exLogs = logs.filter(l => l.bi === bi && l.ei === entry.idx && l.done);
         html += `<div style="margin-bottom:12px"><div style="font-weight:700;margin-bottom:4px">${esc(entry.ex.name)}</div>`;
-        if (exLogs.length > 0) html += exLogs.map(l => `<div style="font-size:13px;color:var(--text-secondary)">${l.weight}kg × ${l.reps}</div>`).join('');
+        if (exLogs.length > 0) html += exLogs.map(l => {
+          const m = getExerciseMeasure(entry.ex.name);
+          const u = m === 'time' ? formatDuration(l.weight) : l.weight + (m === 'distance' ? 'm' : 'kg');
+          return `<div style="font-size:13px;color:var(--text-secondary)">${u} × ${l.reps}${m === 'time' ? ' rounds' : ''}</div>`;
+        }).join('');
         else if (block.mode === 'amrap' && h.amrapRounds) html += `<div style="font-size:13px;color:var(--text-secondary)">${h.amrapRounds} rounds</div>`;
         html += '</div>';
       } else {
@@ -1825,7 +2184,11 @@ function showHistoryDetail(id) {
           const label = String.fromCharCode(65 + si);
           const exLogs = logs.filter(l => l.bi === bi && l.ei === item.idx && l.done);
           html += `<div style="margin-bottom:8px"><div style="font-weight:700;margin-bottom:2px;color:var(--accent)">${label}: ${esc(item.ex.name)}</div>`;
-          if (exLogs.length > 0) html += exLogs.map(l => `<div style="font-size:13px;color:var(--text-secondary)">${l.weight}kg × ${l.reps}</div>`).join('');
+          if (exLogs.length > 0) html += exLogs.map(l => {
+            const m = getExerciseMeasure(item.ex.name);
+            const u = m === 'time' ? formatDuration(l.weight) : l.weight + (m === 'distance' ? 'm' : 'kg');
+            return `<div style="font-size:13px;color:var(--text-secondary)">${u} × ${l.reps}${m === 'time' ? ' rounds' : ''}</div>`;
+          }).join('');
           html += '</div>';
         });
         html += '</div>';
