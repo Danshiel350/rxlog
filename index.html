@@ -1152,14 +1152,6 @@ if (exerciseLibrary.length === 0) {
   if (exerciseLibrary.length > 0) DB.set('exerciseLibrary', exerciseLibrary);
 }
 
-function ensureInLibrary(name) {
-  if (!name) return;
-  const exists = exerciseLibrary.some(e => e.name.toLowerCase() === name.toLowerCase());
-  if (!exists) {
-    exerciseLibrary.push({ id: uid(), name, category: '' });
-    DB.set('exerciseLibrary', exerciseLibrary);
-  }
-}
 
 function renderExerciseLibrary() {
   const el = document.getElementById('exercise-lib-list');
@@ -1265,12 +1257,22 @@ function deleteLibraryExercise(id) {
 }
 
 // Autocomplete for exercise name in workout builder
+let selectedLibraryExercise = null;
+
 function onExerciseNameInput() {
   const input = document.getElementById('exercise-name');
   const list = document.getElementById('exercise-ac-list');
   const query = input.value.trim().toLowerCase();
+  selectedLibraryExercise = null;
 
-  if (!query) { list.classList.remove('visible'); return; }
+  if (!query) {
+    list.classList.remove('visible');
+    if (exerciseLibrary.length === 0) {
+      list.innerHTML = '<div class="autocomplete-item ac-add" style="pointer-events:none;opacity:0.5">No exercises yet — add some in the Exercises tab</div>';
+      list.classList.add('visible');
+    }
+    return;
+  }
 
   const matches = exerciseLibrary
     .filter(e => e.name.toLowerCase().includes(query))
@@ -1281,25 +1283,25 @@ function onExerciseNameInput() {
     })
     .slice(0, 8);
 
-  const exactMatch = matches.some(e => e.name.toLowerCase() === query);
+  let html = matches.map(e => {
+    const mLabel = e.measure === 'time' ? '⏱' : e.measure === 'distance' ? '📏' : '';
+    return `<div class="autocomplete-item" onmousedown="selectExerciseAc('${esc(e.name).replace(/'/g, "\\'")}')">
+      ${esc(e.name)}${e.category ? `<span class="ac-category">${esc(e.category)}</span>` : ''}${mLabel ? `<span class="ac-category">${mLabel}</span>` : ''}
+    </div>`;
+  }).join('');
 
-  let html = matches.map(e =>
-    `<div class="autocomplete-item" onmousedown="selectExerciseAc('${esc(e.name).replace(/'/g, "\\'")}')">
-      ${esc(e.name)}${e.category ? `<span class="ac-category">${esc(e.category)}</span>` : ''}
-    </div>`
-  ).join('');
-
-  if (!exactMatch && query.length > 0) {
-    html += `<div class="autocomplete-item ac-add" onmousedown="selectExerciseAc('${esc(input.value.trim()).replace(/'/g, "\\'")}')">+ Add "${esc(input.value.trim())}"</div>`;
+  if (matches.length === 0) {
+    html = '<div class="autocomplete-item ac-add" style="pointer-events:none;opacity:0.5">No matches — add it in the Exercises tab</div>';
   }
 
   list.innerHTML = html;
-  list.classList.toggle('visible', html.length > 0);
+  list.classList.add('visible');
 }
 
 function selectExerciseAc(name) {
   document.getElementById('exercise-name').value = name;
   document.getElementById('exercise-ac-list').classList.remove('visible');
+  selectedLibraryExercise = name;
   applyMeasureToBuilder(name);
 }
 
@@ -1588,14 +1590,22 @@ function openExerciseModal(mode) {
   document.getElementById('exercise-fields-amrap').style.display = mode === 'amrap' ? '' : 'none';
   document.getElementById('exercise-weight-label').textContent = 'Weight hint (optional)';
   document.getElementById('exercise-weight').placeholder = 'e.g. 80';
+  selectedLibraryExercise = null;
   openModal('modal-exercise');
 }
 
 function saveExercise() {
   const name = document.getElementById('exercise-name').value.trim();
   if (!name) return;
+  const inLib = exerciseLibrary.some(e => e.name.toLowerCase() === name.toLowerCase());
+  if (!inLib) {
+    document.getElementById('exercise-name').style.outline = '2px solid var(--danger)';
+    setTimeout(() => document.getElementById('exercise-name').style.outline = '', 1500);
+    return;
+  }
+  const libEx = exerciseLibrary.find(e => e.name.toLowerCase() === name.toLowerCase());
   const mode = builderBlocks[currentBlockIndex].mode;
-  const ex = { name };
+  const ex = { name: libEx.name };
 
   if (mode === 'strength') {
     ex.sets = +document.getElementById('exercise-sets').value || 3;
@@ -1610,7 +1620,6 @@ function saveExercise() {
   }
 
   builderBlocks[currentBlockIndex].exercises.push(ex);
-  ensureInLibrary(name);
   closeModal('modal-exercise');
   renderBlocks();
 }
