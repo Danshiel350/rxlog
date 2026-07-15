@@ -409,6 +409,98 @@ body {
   opacity: 0.5;
 }
 
+.set-row.skipped {
+  opacity: 0.35;
+}
+
+.set-row.skipped .set-number::after {
+  content: ' skip';
+  font-size: 9px;
+  color: var(--text-muted);
+}
+
+.set-skip {
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  border: 1px solid var(--surface-3);
+  background: none;
+  color: var(--text-muted);
+  font-size: 11px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  transition: all 0.2s;
+}
+
+.set-skip.done {
+  border-color: var(--danger);
+  color: var(--danger);
+}
+
+.train-block-section {
+  margin-bottom: 24px;
+  scroll-margin-top: 80px;
+}
+
+.train-block-section.future {
+  opacity: 0.4;
+}
+
+.train-exercise-header {
+  padding: 12px 16px 6px;
+  font-weight: 700;
+  font-size: 16px;
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+}
+
+.train-exercise-header .ex-prescription {
+  font-size: 12px;
+  color: var(--text-secondary);
+  font-weight: 400;
+}
+
+.train-exercise-header .ex-last {
+  font-size: 11px;
+  color: var(--accent);
+  font-weight: 400;
+  margin-left: auto;
+}
+
+.exercise-history-modal-body {
+  max-height: 60vh;
+  overflow-y: auto;
+  padding: 0 4px;
+}
+
+.ex-history-session {
+  margin-bottom: 16px;
+}
+
+.ex-history-session .session-date {
+  font-size: 12px;
+  color: var(--text-secondary);
+  margin-bottom: 4px;
+}
+
+.ex-history-session .session-sets {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.ex-history-session .set-pill {
+  padding: 4px 10px;
+  background: var(--surface);
+  border-radius: 12px;
+  font-size: 13px;
+  font-weight: 600;
+}
+
 .set-number {
   font-size: 13px;
   font-weight: 700;
@@ -1123,6 +1215,15 @@ input[type="number"] { -moz-appearance: textfield; }
   </div>
 </div>
 
+<!-- ════════════ MODAL: EXERCISE HISTORY ════════════ -->
+<div class="modal-overlay" id="modal-exercise-history">
+  <div class="modal">
+    <div class="modal-handle"></div>
+    <div id="exercise-history-content"></div>
+    <button class="btn btn-secondary" onclick="closeModal('modal-exercise-history')" style="margin-top:16px">Close</button>
+  </div>
+</div>
+
 <script>
 const DB = {
   get(key, fallback) {
@@ -1167,7 +1268,7 @@ function renderExerciseLibrary() {
 
   el.innerHTML = filtered.map(e => `
     <div class="exercise-lib-item">
-      <div class="lib-name">${esc(e.name)}</div>
+      <div class="lib-name" onclick="showExerciseHistory('${esc(e.name).replace(/'/g, "\\'")}')" style="cursor:pointer">${esc(e.name)}</div>
       <div style="display:flex;align-items:center;gap:6px">
         ${e.measure === 'time' ? '<span class="lib-category">Time</span>' : e.measure === 'distance' ? '<span class="lib-category">Distance</span>' : ''}
         ${e.category ? `<span class="lib-category">${esc(e.category)}</span>` : ''}
@@ -1678,6 +1779,8 @@ function startWorkout(id) {
     timerRunning: false,
     timerSeconds: 0,
     restSeconds: 0,
+    restStartedAt: 0,
+    restDuration: 0,
     isResting: false,
   };
   sessionStartTime = Date.now();
@@ -1695,6 +1798,19 @@ function startSessionTimer() {
   }, 200);
 }
 
+function getRestRemaining() {
+  if (!activeSession || !activeSession.isResting) return 0;
+  const elapsed = (Date.now() - activeSession.restStartedAt) / 1000;
+  return Math.max(0, activeSession.restDuration - elapsed);
+}
+
+function startRest(duration) {
+  activeSession.isResting = true;
+  activeSession.restStartedAt = Date.now();
+  activeSession.restDuration = duration;
+  activeSession.timerRunning = true;
+}
+
 function updateTimers() {
   if (!activeSession || !activeSession.timerRunning) return;
   const block = activeSession.blocks[activeSession.currentBlock];
@@ -1702,9 +1818,7 @@ function updateTimers() {
 
   if (block.mode === 'strength') {
     if (activeSession.isResting) {
-      activeSession.restSeconds -= 0.2;
-      if (activeSession.restSeconds <= 0) {
-        activeSession.restSeconds = 0;
+      if (getRestRemaining() <= 0) {
         activeSession.isResting = false;
         activeSession.timerRunning = false;
         vibrate();
@@ -1752,136 +1866,188 @@ function renderTrainView() {
 }
 
 function renderStrengthBlock(block) {
+  const bi = activeSession.currentBlock;
   const entries = getEntries(block);
-  const entry = entries[activeSession.currentEntry];
-  if (!entry) return '';
+  const restRemaining = getRestRemaining();
 
-  if (entry.type === 'superset') return renderSupersetEntry(block, entry, entries);
+  let html = '';
+  entries.forEach((entry, entryIdx) => {
+    const isCurrent = entryIdx === activeSession.currentEntry;
+    const isPast = entryIdx < activeSession.currentEntry;
 
-  const ex = entry.ex;
-  const ei = entry.idx;
-  const totalSets = ex.sets || 3;
-  const measure = getExerciseMeasure(ex.name);
-  const isTime = measure === 'time';
-  const isDist = measure === 'distance';
-  const mUnit = isTime ? 'sec' : isDist ? 'm' : 'kg';
-  const lastWeight = getLastWeight(ex.name);
-  const defaultWeight = lastWeight || ex.weight || '';
-  const fmtVal = v => isTime ? formatDuration(v) : v + mUnit;
-  const lastWeightLabel = lastWeight
-    ? `Last: ${fmtVal(lastWeight)}`
-    : (ex.weight ? `Hint: ${fmtVal(ex.weight)}` : '');
+    if (entry.type === 'superset') {
+      const ssExercises = entry.exercises;
+      const maxSets = Math.max(...ssExercises.map(e => e.ex.sets || 3));
+      const labels = ssExercises.map((_, i) => String.fromCharCode(65 + i));
 
-  let setsHtml = '';
-  for (let s = 0; s < totalSets; s++) {
-    const log = getSetLog(activeSession.currentBlock, ei, s);
-    const isActive = s === activeSession.currentSet;
-    const isDone = log && log.done;
-    setsHtml += `
-      <div class="set-row ${isActive ? 'active' : ''} ${isDone ? 'completed' : ''}">
-        <div class="set-number">S${s + 1}</div>
-        <div class="set-field">
-          <input class="set-input" type="number" inputmode="decimal" value="${log ? log.weight : ''}"
-            onchange="updateSetLog(${activeSession.currentBlock},${ei},${s},'weight',+this.value)" placeholder="${defaultWeight || '—'}">
-          <span class="set-input-label">${mUnit}</span>
-        </div>
-        <div class="set-field">
-          <input class="set-input" type="number" inputmode="numeric" value="${log ? log.reps : ex.reps || ''}"
-            onchange="updateSetLog(${activeSession.currentBlock},${ei},${s},'reps',+this.value)" placeholder="${ex.reps || '—'}">
-          <span class="set-input-label">${isTime ? 'rounds' : 'reps'}</span>
-        </div>
-        <button class="set-check ${isDone ? 'done' : ''}" onclick="completeStandaloneSet(${s})">✓</button>
+      html += `<div class="train-block-section ${!isCurrent && !isPast ? 'future' : ''}" id="entry-${entryIdx}">`;
+      html += `<div class="train-exercise-header" style="border-left:3px solid var(--accent);margin-left:12px">
+        <span>Superset: ${ssExercises.map((e, i) => `${labels[i]} ${esc(e.ex.name)}`).join(' / ')}</span>
       </div>`;
-  }
 
-  const restDisplay = activeSession.isResting ?
-    `<div class="timer-display"><div class="timer-value">${Math.ceil(activeSession.restSeconds)}</div><div class="timer-label">Rest</div>
-      <div class="timer-edit-row">
-        <button class="btn btn-secondary btn-sm" style="width:auto;padding:6px 12px" onclick="adjustRest(-15)">−15s</button>
-        <button class="btn btn-secondary btn-sm" style="width:auto;padding:6px 12px" onclick="adjustRest(15)">+15s</button>
-        <button class="btn btn-primary btn-sm" style="width:auto;padding:6px 12px" onclick="skipRest()">Skip</button>
-      </div></div>` : '';
+      if (isCurrent && activeSession.isResting && restRemaining > 0) {
+        html += renderRestTimer(restRemaining);
+      }
 
-  return `
-    <div class="current-exercise">
-      <div class="exercise-label">Exercise ${activeSession.currentEntry + 1}/${entries.length}</div>
-      <div class="exercise-title">${esc(ex.name)}</div>
-      <div class="exercise-prescription">${totalSets} × ${ex.reps} · ${ex.rest || 60}s rest</div>
-      ${lastWeightLabel ? `<div style="font-size:13px;color:var(--accent);margin-top:4px">${lastWeightLabel}</div>` : ''}
-    </div>
-    ${restDisplay}
-    <div class="set-tracker">${setsHtml}</div>`;
+      for (let r = 0; r < maxSets; r++) {
+        const roundDone = ssExercises.every(item => {
+          if (r >= (item.ex.sets || 3)) return true;
+          const log = getSetLog(bi, item.idx, r);
+          return log && (log.done || log.skipped);
+        });
+        const isCurrentRound = isCurrent && r === (activeSession.supersetRound || 0);
+
+        html += `<div class="block-header" style="padding:0 16px"><span class="block-label" style="color:${roundDone ? 'var(--text-muted)' : isCurrentRound ? 'var(--accent)' : 'var(--text-secondary)'}">Round ${r + 1}</span><span class="block-line"></span></div>`;
+
+        ssExercises.forEach((item, si) => {
+          if (r >= (item.ex.sets || 3)) return;
+          const log = getSetLog(bi, item.idx, r);
+          const isDone = log && log.done;
+          const isSkipped = log && log.skipped;
+          const isActive = isCurrentRound && si === (activeSession.supersetExIndex || 0) && !isDone && !isSkipped;
+          const lw = getLastWeight(item.ex.name);
+          const placeholder = lw || item.ex.weight || '—';
+          const itemMeasure = getExerciseMeasure(item.ex.name);
+          const itemUnit = itemMeasure === 'time' ? 'sec' : itemMeasure === 'distance' ? 'm' : 'kg';
+
+          html += `
+            ${si > 0 ? '<div class="ss-connector" style="margin:2px 20px"></div>' : ''}
+            <div class="set-row ${isActive ? 'active' : ''} ${isDone ? 'completed' : ''} ${isSkipped ? 'skipped' : ''}" style="margin:0 16px 0 16px">
+              <div class="set-number" style="width:40px">${labels[si]}</div>
+              <div style="flex:1;font-size:13px;font-weight:600;${isDone || isSkipped ? 'text-decoration:line-through;opacity:0.5' : ''}">${esc(item.ex.name)}</div>
+              <div class="set-field">
+                <input class="set-input" type="number" inputmode="decimal" value="${log ? log.weight : ''}"
+                  onchange="updateSetLog(${bi},${item.idx},${r},'weight',+this.value)" placeholder="${placeholder}" style="width:56px">
+                <span class="set-input-label">${itemUnit}</span>
+              </div>
+              <div class="set-field">
+                <input class="set-input" type="number" inputmode="numeric" value="${log ? log.reps : item.ex.reps || ''}"
+                  onchange="updateSetLog(${bi},${item.idx},${r},'reps',+this.value)" placeholder="${item.ex.reps || '—'}" style="width:56px">
+                <span class="set-input-label">${itemMeasure === 'time' ? 'rounds' : 'reps'}</span>
+              </div>
+              <button class="set-skip ${isSkipped ? 'done' : ''}" onclick="skipSet(${entryIdx},${r},${si},'superset')">✕</button>
+              <button class="set-check ${isDone ? 'done' : ''}" onclick="completeSupersetExercise(${r},${si})">✓</button>
+            </div>`;
+        });
+      }
+      html += '</div>';
+    } else {
+      const ex = entry.ex;
+      const ei = entry.idx;
+      const totalSets = ex.sets || 3;
+      const measure = getExerciseMeasure(ex.name);
+      const isTime = measure === 'time';
+      const isDist = measure === 'distance';
+      const mUnit = isTime ? 'sec' : isDist ? 'm' : 'kg';
+      const lastWeight = getLastWeight(ex.name);
+      const defaultWeight = lastWeight || ex.weight || '';
+      const fmtVal = v => isTime ? formatDuration(v) : v + mUnit;
+      const lastLabel = lastWeight ? `Last: ${fmtVal(lastWeight)}` : (ex.weight ? `Hint: ${fmtVal(ex.weight)}` : '');
+
+      const allDone = Array.from({ length: totalSets }, (_, i) => i).every(i => {
+        const l = getSetLog(bi, ei, i); return l && (l.done || l.skipped);
+      });
+
+      html += `<div class="train-block-section ${!isCurrent && !isPast ? 'future' : ''}" id="entry-${entryIdx}">`;
+      html += `<div class="train-exercise-header" onclick="showExerciseHistory('${esc(ex.name).replace(/'/g, "\\'")}')">
+        <span>${esc(ex.name)}</span>
+        <span class="ex-prescription">${totalSets} × ${ex.reps} · ${ex.rest || 60}s</span>
+        ${lastLabel ? `<span class="ex-last">${lastLabel}</span>` : ''}
+      </div>`;
+
+      if (isCurrent && activeSession.isResting && restRemaining > 0) {
+        html += renderRestTimer(restRemaining);
+      }
+
+      for (let s = 0; s < totalSets; s++) {
+        const log = getSetLog(bi, ei, s);
+        const isActive = isCurrent && s === activeSession.currentSet && !allDone;
+        const isDone = log && log.done;
+        const isSkipped = log && log.skipped;
+        html += `
+          <div class="set-row ${isActive ? 'active' : ''} ${isDone ? 'completed' : ''} ${isSkipped ? 'skipped' : ''}" style="margin:0 16px">
+            <div class="set-number">S${s + 1}</div>
+            <div class="set-field">
+              <input class="set-input" type="number" inputmode="decimal" value="${log ? log.weight : ''}"
+                onchange="updateSetLog(${bi},${ei},${s},'weight',+this.value)" placeholder="${defaultWeight || '—'}">
+              <span class="set-input-label">${mUnit}</span>
+            </div>
+            <div class="set-field">
+              <input class="set-input" type="number" inputmode="numeric" value="${log ? log.reps : ex.reps || ''}"
+                onchange="updateSetLog(${bi},${ei},${s},'reps',+this.value)" placeholder="${ex.reps || '—'}">
+              <span class="set-input-label">${isTime ? 'rounds' : 'reps'}</span>
+            </div>
+            <button class="set-skip ${isSkipped ? 'done' : ''}" onclick="skipSet(${entryIdx},${s},-1,'standalone')">✕</button>
+            <button class="set-check ${isDone ? 'done' : ''}" onclick="completeStandaloneSet(${s})">✓</button>
+          </div>`;
+      }
+      html += '</div>';
+    }
+  });
+
+  return `<div class="set-tracker">${html}</div>`;
 }
 
-function renderSupersetEntry(block, entry, entries) {
+function renderRestTimer(remaining) {
+  return `<div class="timer-display" style="padding:12px 16px">
+    <div class="timer-value" style="font-size:48px">${Math.ceil(remaining)}</div>
+    <div class="timer-label">Rest</div>
+    <div class="timer-edit-row">
+      <button class="btn btn-secondary btn-sm" style="width:auto;padding:6px 12px" onclick="adjustRest(-15)">−15s</button>
+      <button class="btn btn-secondary btn-sm" style="width:auto;padding:6px 12px" onclick="adjustRest(15)">+15s</button>
+      <button class="btn btn-primary btn-sm" style="width:auto;padding:6px 12px" onclick="skipRest()">Skip</button>
+    </div></div>`;
+}
+
+function skipSet(entryIdx, setIdx, subIdx, type) {
   const bi = activeSession.currentBlock;
-  const ssExercises = entry.exercises;
-  const maxSets = Math.max(...ssExercises.map(e => e.ex.sets || 3));
-  const currentRound = activeSession.supersetRound || 0;
-  const currentExInRound = activeSession.supersetExIndex || 0;
-  const currentEx = ssExercises[currentExInRound] ? ssExercises[currentExInRound].ex : ssExercises[0].ex;
-  const labels = ssExercises.map((_, i) => String.fromCharCode(65 + i));
+  const block = activeSession.blocks[bi];
+  const entries = getEntries(block);
+  const entry = entries[entryIdx];
+  if (!entry) return;
 
-  const restDisplay = activeSession.isResting ?
-    `<div class="timer-display"><div class="timer-value">${Math.ceil(activeSession.restSeconds)}</div>
-      <div class="timer-label">Rest — then Round ${currentRound + 2}</div>
-      <div class="timer-edit-row">
-        <button class="btn btn-secondary btn-sm" style="width:auto;padding:6px 12px" onclick="adjustRest(-15)">−15s</button>
-        <button class="btn btn-secondary btn-sm" style="width:auto;padding:6px 12px" onclick="adjustRest(15)">+15s</button>
-        <button class="btn btn-primary btn-sm" style="width:auto;padding:6px 12px" onclick="skipRest()">Skip</button>
-      </div></div>` : '';
-
-  let roundsHtml = '';
-  for (let r = 0; r < maxSets; r++) {
-    const isCurrentRound = r === currentRound;
-    const roundDone = ssExercises.every(item => {
-      if (r >= (item.ex.sets || 3)) return true;
-      const log = getSetLog(bi, item.idx, r);
-      return log && log.done;
-    });
-
-    roundsHtml += `<div class="block-header"><span class="block-label" style="color:${roundDone ? 'var(--text-muted)' : isCurrentRound ? 'var(--accent)' : 'var(--text-secondary)'}">Round ${r + 1}</span><span class="block-line"></span></div>`;
-
-    ssExercises.forEach((item, si) => {
-      if (r >= (item.ex.sets || 3)) return;
-      const log = getSetLog(bi, item.idx, r);
-      const isDone = log && log.done;
-      const isActive = isCurrentRound && si === currentExInRound && !isDone;
-      const lw = getLastWeight(item.ex.name);
-      const placeholder = lw || item.ex.weight || '—';
-      const itemMeasure = getExerciseMeasure(item.ex.name);
-      const itemIsTime = itemMeasure === 'time';
-      const itemIsDist = itemMeasure === 'distance';
-      const itemUnit = itemIsTime ? 'sec' : itemIsDist ? 'm' : 'kg';
-
-      roundsHtml += `
-        ${si > 0 ? '<div class="ss-connector" style="margin:2px 20px"></div>' : ''}
-        <div class="set-row ${isActive ? 'active' : ''} ${isDone ? 'completed' : ''}" style="margin-bottom:0">
-          <div class="set-number" style="width:40px">${labels[si]}</div>
-          <div style="flex:1;font-size:13px;font-weight:600;${isDone ? 'text-decoration:line-through;opacity:0.5' : ''}">${esc(item.ex.name)}</div>
-          <div class="set-field">
-            <input class="set-input" type="number" inputmode="decimal" value="${log ? log.weight : ''}"
-              onchange="updateSetLog(${bi},${item.idx},${r},'weight',+this.value)" placeholder="${placeholder}" style="width:56px">
-            <span class="set-input-label">${itemUnit}</span>
-          </div>
-          <div class="set-field">
-            <input class="set-input" type="number" inputmode="numeric" value="${log ? log.reps : item.ex.reps || ''}"
-              onchange="updateSetLog(${bi},${item.idx},${r},'reps',+this.value)" placeholder="${item.ex.reps || '—'}" style="width:56px">
-            <span class="set-input-label">${itemIsTime ? 'rounds' : 'reps'}</span>
-          </div>
-          <button class="set-check ${isDone ? 'done' : ''}" onclick="completeSupersetExercise(${r},${si})">✓</button>
-        </div>`;
-    });
+  let ei, ex;
+  if (type === 'superset') {
+    const item = entry.exercises[subIdx];
+    ei = item.idx; ex = item.ex;
+  } else {
+    ei = entry.idx; ex = entry.ex;
   }
 
-  return `
-    <div class="current-exercise">
-      <div class="exercise-label">Superset · ${activeSession.currentEntry + 1}/${entries.length} · Round ${currentRound + 1}/${maxSets}</div>
-      <div class="exercise-title">${labels[currentExInRound]}: ${esc(currentEx.name)}</div>
-      <div class="exercise-prescription">${ssExercises.map((e, i) => `${labels[i]}: ${e.ex.reps} reps`).join(' · ')}</div>
-    </div>
-    ${restDisplay}
-    <div class="set-tracker" style="padding:0 16px">${roundsHtml}</div>`;
+  let log = getSetLog(bi, ei, setIdx);
+  if (!log) {
+    log = { bi, ei, si: setIdx, weight: 0, reps: 0, done: false, skipped: false };
+    activeSession.setLogs.push(log);
+  }
+  log.skipped = !log.skipped;
+  if (log.skipped) log.done = false;
+
+  if (log.skipped && entryIdx === activeSession.currentEntry) {
+    checkAutoAdvance(entries, entryIdx, block);
+  }
+  renderTrainView();
+}
+
+function checkAutoAdvance(entries, entryIdx, block) {
+  const bi = activeSession.currentBlock;
+  const entry = entries[entryIdx];
+  if (entry.type === 'superset') {
+    const maxSets = Math.max(...entry.exercises.map(e => e.ex.sets || 3));
+    const allComplete = Array.from({ length: maxSets }, (_, r) =>
+      entry.exercises.every(item => {
+        if (r >= (item.ex.sets || 3)) return true;
+        const l = getSetLog(bi, item.idx, r);
+        return l && (l.done || l.skipped);
+      })
+    ).every(Boolean);
+    if (allComplete) advanceEntry();
+  } else {
+    const totalSets = entry.ex.sets || 3;
+    const allComplete = Array.from({ length: totalSets }, (_, i) => {
+      const l = getSetLog(bi, entry.idx, i); return l && (l.done || l.skipped);
+    }).every(Boolean);
+    if (allComplete) advanceEntry();
+  }
 }
 
 function renderEmomBlock(block) {
@@ -1942,7 +2108,7 @@ function renderTimerDisplay() {
   const timerEl = document.querySelector('.timer-value');
   if (!timerEl) return;
   if (block.mode === 'strength' && activeSession.isResting) {
-    timerEl.textContent = Math.ceil(activeSession.restSeconds);
+    timerEl.textContent = Math.ceil(getRestRemaining());
   } else if (block.mode === 'emom') {
     timerEl.textContent = Math.max(0, Math.ceil(activeSession.timerSeconds));
   } else if (block.mode === 'amrap') {
@@ -1993,14 +2159,13 @@ function completeStandaloneSet(si) {
   log.done = !log.done;
 
   if (log.done) {
+    if (log.skipped) log.skipped = false;
     const allDone = Array.from({ length: ex.sets || 3 }, (_, i) => i)
-      .every(i => { const l = getSetLog(bi, ei, i); return l && l.done; });
+      .every(i => { const l = getSetLog(bi, ei, i); return l && (l.done || l.skipped); });
     if (allDone) { advanceEntry(); return; }
     else {
       activeSession.currentSet = si + 1;
-      activeSession.isResting = true;
-      activeSession.restSeconds = ex.rest || 60;
-      activeSession.timerRunning = true;
+      startRest(ex.rest || 60);
     }
   }
   renderTrainView();
@@ -2024,13 +2189,14 @@ function completeSupersetExercise(round, subIdx) {
     activeSession.setLogs.push(log);
   }
   log.done = !log.done;
+  if (log.done && log.skipped) log.skipped = false;
 
   if (log.done) {
     const maxSets = Math.max(...entry.exercises.map(e => e.ex.sets || 3));
     const roundDone = entry.exercises.every(item2 => {
       if (round >= (item2.ex.sets || 3)) return true;
       const l = getSetLog(bi, item2.idx, round);
-      return l && l.done;
+      return l && (l.done || l.skipped);
     });
 
     if (roundDone) {
@@ -2039,9 +2205,7 @@ function completeSupersetExercise(round, subIdx) {
       activeSession.supersetRound = nextRound;
       activeSession.supersetExIndex = 0;
       const lastEx = entry.exercises[entry.exercises.length - 1].ex;
-      activeSession.isResting = true;
-      activeSession.restSeconds = lastEx.rest || 60;
-      activeSession.timerRunning = true;
+      startRest(lastEx.rest || 60);
     } else {
       let next = subIdx + 1;
       while (next < entry.exercises.length && round >= (entry.exercises[next].ex.sets || 3)) next++;
@@ -2067,10 +2231,10 @@ function advanceEntry() {
   }
 }
 
-function adjustRest(delta) { activeSession.restSeconds = Math.max(0, activeSession.restSeconds + delta); }
+function adjustRest(delta) { activeSession.restDuration = Math.max(0, activeSession.restDuration + delta); }
 
 function skipRest() {
-  activeSession.isResting = false; activeSession.timerRunning = false; activeSession.restSeconds = 0;
+  activeSession.isResting = false; activeSession.timerRunning = false;
   renderTrainView();
 }
 
@@ -2207,6 +2371,53 @@ function showHistoryDetail(id) {
 
   document.getElementById('history-detail-content').innerHTML = html;
   openModal('modal-history-detail');
+}
+
+function showExerciseHistory(exerciseName) {
+  const measure = getExerciseMeasure(exerciseName);
+  const isTime = measure === 'time';
+  const isDist = measure === 'distance';
+  const mUnit = isTime ? '' : isDist ? 'm' : 'kg';
+
+  const sessions = [];
+  history.forEach(h => {
+    const logs = h.setLogs || [];
+    (h.blocks || []).forEach((block, bi) => {
+      block.exercises.forEach((ex, ei) => {
+        if (ex.name !== exerciseName) return;
+        const exLogs = logs.filter(l => l.bi === bi && l.ei === ei && l.done);
+        if (exLogs.length > 0) {
+          sessions.push({ date: h.date, workout: h.templateName, sets: exLogs });
+        }
+      });
+    });
+  });
+
+  let html = `<h2>${esc(exerciseName)}</h2>`;
+  if (measure !== 'weight') html += `<div style="font-size:12px;color:var(--text-secondary);margin-bottom:12px;text-transform:uppercase">${measure}</div>`;
+
+  if (sessions.length === 0) {
+    html += '<p style="color:var(--text-secondary)">No history yet for this exercise.</p>';
+  } else {
+    html += '<div class="exercise-history-modal-body">';
+    sessions.forEach(s => {
+      const d = new Date(s.date);
+      const dateStr = d.toLocaleDateString('en-GB', { weekday: 'short', day: 'numeric', month: 'short', year: 'numeric' });
+      html += `<div class="ex-history-session">
+        <div class="session-date">${dateStr} · ${esc(s.workout)}</div>
+        <div class="session-sets">
+          ${s.sets.map(l => {
+            const val = isTime ? formatDuration(l.weight) : l.weight + mUnit;
+            return `<span class="set-pill">${val} × ${l.reps}</span>`;
+          }).join('')}
+        </div>
+      </div>`;
+    });
+    html += '</div>';
+  }
+
+  document.getElementById('exercise-history-content').innerHTML = html;
+  openModal('modal-exercise-history');
 }
 
 function exportCSV() {
