@@ -864,6 +864,33 @@ input[type="number"] { -moz-appearance: textfield; }
 .emom-dot.done { background: var(--accent); }
 .emom-dot.active { background: var(--accent); animation: pulse 1s infinite; }
 
+.emom-exercise-list {
+  padding: 0 16px;
+  margin-bottom: 16px;
+}
+
+.emom-exercise-row {
+  padding: 12px 16px;
+  border-radius: var(--radius-sm);
+  margin-bottom: 6px;
+  background: var(--surface-2);
+  transition: all 0.3s;
+}
+
+.emom-exercise-row.current {
+  background: var(--accent-bg-2);
+  border: 2px solid var(--accent);
+}
+
+.emom-exercise-name {
+  font-size: 15px;
+  font-weight: 700;
+}
+
+.emom-exercise-row.current .emom-exercise-name {
+  color: var(--accent);
+}
+
 @keyframes pulse {
   0%, 100% { opacity: 1; }
   50% { opacity: 0.5; }
@@ -1157,12 +1184,7 @@ input[type="number"] { -moz-appearance: textfield; }
       </div>
     </div>
 
-    <div id="exercise-fields-emom" style="display:none">
-      <div class="form-group">
-        <label class="form-label">Reps per interval</label>
-        <input class="form-input" id="exercise-emom-reps" type="number" placeholder="10" inputmode="numeric">
-      </div>
-    </div>
+    <div id="exercise-fields-emom" style="display:none"></div>
 
     <div id="exercise-fields-amrap" style="display:none">
       <div class="form-group">
@@ -1193,10 +1215,10 @@ input[type="number"] { -moz-appearance: textfield; }
     </div>
     <div class="form-group">
       <label class="form-label">Measure</label>
-      <div class="mode-tabs" id="lib-exercise-measure">
-        <button class="mode-tab active" onclick="setLibMeasure('weight')">Weight</button>
-        <button class="mode-tab" onclick="setLibMeasure('time')">Time</button>
-        <button class="mode-tab" onclick="setLibMeasure('distance')">Distance</button>
+      <div class="mode-selector" id="lib-exercise-measure">
+        <button class="mode-btn active" onclick="setLibMeasure('weight')">Weight</button>
+        <button class="mode-btn" onclick="setLibMeasure('time')">Time</button>
+        <button class="mode-btn" onclick="setLibMeasure('distance')">Distance</button>
       </div>
     </div>
     <div style="display:flex;gap:10px;margin-top:8px">
@@ -1304,7 +1326,7 @@ let libMeasure = 'weight';
 
 function setLibMeasure(m) {
   libMeasure = m;
-  document.querySelectorAll('#lib-exercise-measure .mode-tab').forEach(b => {
+  document.querySelectorAll('#lib-exercise-measure .mode-btn').forEach(b => {
     b.classList.toggle('active', b.textContent.toLowerCase().includes(m));
   });
 }
@@ -1660,7 +1682,7 @@ function exerciseDetail(ex, mode) {
     if (ex.rest) detail += ` · ${ex.rest}s rest`;
     return detail;
   }
-  if (mode === 'emom') return `${ex.reps || 0} reps/interval`;
+  if (mode === 'emom') return 'per interval';
   if (mode === 'amrap') return `${ex.reps || 0} reps/round`;
   return '';
 }
@@ -1703,7 +1725,6 @@ function openExerciseModal(mode) {
   document.getElementById('exercise-reps').value = '';
   document.getElementById('exercise-weight').value = '';
   document.getElementById('exercise-rest').value = '';
-  document.getElementById('exercise-emom-reps').value = '';
   document.getElementById('exercise-amrap-reps').value = '';
   document.getElementById('exercise-fields-strength').style.display = mode === 'strength' ? '' : 'none';
   document.getElementById('exercise-fields-emom').style.display = mode === 'emom' ? '' : 'none';
@@ -1734,7 +1755,7 @@ function saveExercise() {
     ex.rest = +document.getElementById('exercise-rest').value || 60;
     if (currentSupersetId) ex.ssId = currentSupersetId;
   } else if (mode === 'emom') {
-    ex.reps = +document.getElementById('exercise-emom-reps').value || 10;
+    // No reps for EMOM — just the exercise name
   } else if (mode === 'amrap') {
     ex.reps = +document.getElementById('exercise-amrap-reps').value || 10;
   }
@@ -1792,6 +1813,9 @@ function startWorkout(id) {
     setLogs: [],
     amrapRounds: 0,
     emomCurrentRound: 0,
+    emomStartedAt: null,
+    emomPausedAt: null,
+    emomPausedElapsed: 0,
     currentExercise: 0,
     supersetRound: 0,
     supersetExIndex: 0,
@@ -1844,14 +1868,19 @@ function updateTimers() {
       }
     }
   } else if (block.mode === 'emom') {
-    activeSession.timerSeconds -= 0.2;
-    if (activeSession.timerSeconds <= 0) {
-      activeSession.emomCurrentRound++;
-      if (activeSession.emomCurrentRound >= (block.duration || 10)) {
-        activeSession.timerRunning = false; vibrate(); nextBlock(); return;
-      }
-      activeSession.timerSeconds = block.interval || 60;
-      activeSession.currentExercise = activeSession.emomCurrentRound % block.exercises.length;
+    if (!activeSession.emomStartedAt) return;
+    const totalRounds = block.duration || 10;
+    const interval = block.interval || 60;
+    const activeTime = (Date.now() - activeSession.emomStartedAt - (activeSession.emomPausedElapsed || 0)) / 1000;
+    const currentRound = Math.floor(activeTime / interval);
+    const prevRound = activeSession.emomCurrentRound;
+
+    if (currentRound >= totalRounds) {
+      activeSession.timerRunning = false; vibrate(); nextBlock(); return;
+    }
+    if (currentRound !== prevRound) {
+      activeSession.emomCurrentRound = currentRound;
+      activeSession.currentExercise = currentRound % block.exercises.length;
       vibrate(); renderTrainView();
     }
   } else if (block.mode === 'amrap') {
@@ -2070,26 +2099,57 @@ function checkAutoAdvance(entries, entryIdx, block) {
   }
 }
 
+function getEmomTimeLeft() {
+  if (!activeSession.emomStartedAt) return 0;
+  const block = activeSession.blocks[activeSession.currentBlock];
+  const interval = block.interval || 60;
+  const activeTime = (Date.now() - activeSession.emomStartedAt - (activeSession.emomPausedElapsed || 0)) / 1000;
+  const elapsed = activeTime % interval;
+  return Math.max(0, interval - elapsed);
+}
+
+function getEmomTotalRemaining() {
+  if (!activeSession.emomStartedAt) return 0;
+  const block = activeSession.blocks[activeSession.currentBlock];
+  const totalTime = (block.duration || 10) * (block.interval || 60);
+  const activeTime = (Date.now() - activeSession.emomStartedAt - (activeSession.emomPausedElapsed || 0)) / 1000;
+  return Math.max(0, totalTime - activeTime);
+}
+
 function renderEmomBlock(block) {
   const totalRounds = block.duration || 10;
-  const ex = block.exercises[activeSession.currentExercise] || block.exercises[0];
-  const timeLeft = Math.max(0, Math.ceil(activeSession.timerSeconds));
+  const interval = block.interval || 60;
+  const currentRound = activeSession.emomCurrentRound;
+  const currentExIdx = block.exercises.length > 0 ? currentRound % block.exercises.length : 0;
+  const intervalLeft = activeSession.emomStartedAt ? Math.ceil(getEmomTimeLeft()) : interval;
+  const totalLeft = activeSession.emomStartedAt ? getEmomTotalRemaining() : totalRounds * interval;
+
   let dotsHtml = '';
   for (let i = 0; i < totalRounds; i++) {
-    const cls = i < activeSession.emomCurrentRound ? 'done' : (i === activeSession.emomCurrentRound && activeSession.timerRunning ? 'active' : '');
+    const cls = i < currentRound ? 'done' : (i === currentRound && activeSession.timerRunning ? 'active' : '');
     dotsHtml += `<div class="emom-dot ${cls}"></div>`;
   }
+
+  let exercisesHtml = '';
+  block.exercises.forEach((ex, i) => {
+    const isCurrent = i === currentExIdx && activeSession.timerRunning;
+    exercisesHtml += `
+      <div class="emom-exercise-row ${isCurrent ? 'current' : ''}">
+        <span class="emom-exercise-name">${esc(ex.name)}</span>
+      </div>`;
+  });
+
   return `
     <div class="current-exercise">
-      <div class="exercise-label">EMOM · Round ${activeSession.emomCurrentRound + 1}/${totalRounds}</div>
-      <div class="exercise-title">${esc(ex.name)}</div>
-      <div class="exercise-prescription">${ex.reps || 0} reps</div>
+      <div class="exercise-label">EMOM · Round ${currentRound + 1}/${totalRounds}</div>
+      <div style="font-size:13px;color:var(--text-secondary);margin-top:2px">${formatTime(Math.ceil(totalLeft))} remaining</div>
     </div>
-    <div class="timer-display"><div class="timer-value">${timeLeft}</div><div class="timer-label">Seconds remaining</div></div>
+    <div class="timer-display"><div class="timer-value">${intervalLeft}</div><div class="timer-label">Interval</div></div>
+    <div class="emom-exercise-list">${exercisesHtml}</div>
     <div class="emom-progress">${dotsHtml}</div>
     <div class="timer-controls">
       ${!activeSession.timerRunning ?
-        `<button class="btn btn-primary" onclick="startEmom()">▶ ${activeSession.emomCurrentRound === 0 ? 'Start' : 'Resume'}</button>` :
+        `<button class="btn btn-primary" onclick="startEmom()">▶ ${activeSession.emomStartedAt ? 'Resume' : 'Start'}</button>` :
         `<button class="btn btn-secondary" onclick="pauseTimer()">❚❚ Pause</button>`}
     </div>`;
 }
@@ -2130,7 +2190,11 @@ function renderTimerDisplay() {
   if (block.mode === 'strength' && activeSession.isResting) {
     timerEl.textContent = Math.ceil(getRestRemaining());
   } else if (block.mode === 'emom') {
-    timerEl.textContent = Math.max(0, Math.ceil(activeSession.timerSeconds));
+    timerEl.textContent = activeSession.emomStartedAt ? Math.ceil(getEmomTimeLeft()) : (block.interval || 60);
+    const totalEl = document.querySelector('.emom-total-remaining');
+    if (totalEl) totalEl.textContent = formatTime(Math.ceil(getEmomTotalRemaining()));
+    const roundEl = document.querySelector('.exercise-label');
+    if (roundEl) roundEl.textContent = `EMOM · Round ${activeSession.emomCurrentRound + 1}/${block.duration || 10}`;
   } else if (block.mode === 'amrap') {
     timerEl.textContent = formatTime(Math.max(0, Math.ceil(activeSession.timerSeconds)));
   }
@@ -2324,8 +2388,14 @@ function confirmSwapExercise() {
 
 function startEmom() {
   const block = activeSession.blocks[activeSession.currentBlock];
-  if (activeSession.timerSeconds <= 0) {
-    activeSession.timerSeconds = block.interval || 60; activeSession.emomCurrentRound = 0; activeSession.currentExercise = 0;
+  if (!activeSession.emomStartedAt) {
+    activeSession.emomStartedAt = Date.now();
+    activeSession.emomPausedElapsed = 0;
+    activeSession.emomCurrentRound = 0;
+    activeSession.currentExercise = 0;
+  } else if (activeSession.emomPausedAt) {
+    activeSession.emomPausedElapsed += Date.now() - activeSession.emomPausedAt;
+    activeSession.emomPausedAt = null;
   }
   activeSession.timerRunning = true; renderTrainView();
 }
@@ -2341,13 +2411,18 @@ function adjustAmrap(delta) {
   const el = document.querySelector('.round-value'); if (el) el.textContent = activeSession.amrapRounds;
 }
 
-function pauseTimer() { activeSession.timerRunning = false; renderTrainView(); }
+function pauseTimer() {
+  const block = activeSession.blocks[activeSession.currentBlock];
+  if (block && block.mode === 'emom') activeSession.emomPausedAt = Date.now();
+  activeSession.timerRunning = false; renderTrainView();
+}
 
 function nextBlock() {
   activeSession.currentBlock++;
   activeSession.currentEntry = 0; activeSession.currentExercise = 0;
   activeSession.currentSet = 0; activeSession.timerRunning = false; activeSession.timerSeconds = 0;
   activeSession.isResting = false; activeSession.emomCurrentRound = 0; activeSession.amrapRounds = 0;
+  activeSession.emomStartedAt = null; activeSession.emomPausedAt = null; activeSession.emomPausedElapsed = 0;
   activeSession.supersetRound = 0; activeSession.supersetExIndex = 0;
   renderTrainView();
 }
