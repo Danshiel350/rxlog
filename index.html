@@ -2485,6 +2485,7 @@ function renderHistory() {
           ${volume > 0 ? `<div class="history-stat"><div class="stat-value">${Math.round(volume).toLocaleString()}</div><div class="stat-label">Volume (kg)</div></div>` : ''}
           ${h.amrapRounds ? `<div class="history-stat"><div class="stat-value">${h.amrapRounds}</div><div class="stat-label">Rounds</div></div>` : ''}
         </div>
+        ${h.notes ? `<div style="margin-top:8px;font-size:12px;color:var(--text-secondary);font-style:italic;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${esc(h.notes)}</div>` : ''}
       </div>`;
   }).join('');
 }
@@ -2528,8 +2529,24 @@ function showHistoryDetail(id) {
     });
   });
 
+  html += `<div class="form-group" style="margin-top:20px">
+    <label class="form-label">Notes</label>
+    <textarea class="form-input" id="history-notes" rows="3" placeholder="How did it feel? Anything to remember next time?"
+      style="resize:vertical;min-height:60px">${esc(h.notes || '')}</textarea>
+  </div>
+  <button class="btn btn-primary btn-sm" onclick="saveHistoryNotes('${h.id}')" style="margin-top:4px">Save Notes</button>`;
+
   document.getElementById('history-detail-content').innerHTML = html;
   openModal('modal-history-detail');
+}
+
+function saveHistoryNotes(id) {
+  const h = history.find(x => x.id === id);
+  if (!h) return;
+  h.notes = document.getElementById('history-notes').value.trim();
+  DB.set('history', history);
+  const btn = document.querySelector('#history-detail-content .btn-primary');
+  if (btn) { btn.textContent = 'Saved'; setTimeout(() => btn.textContent = 'Save Notes', 1500); }
 }
 
 function showExerciseHistory(exerciseName) {
