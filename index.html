@@ -751,6 +751,30 @@ body {
   white-space: nowrap;
 }
 
+.block-label-input {
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 1px;
+  color: var(--accent);
+  background: none;
+  border: none;
+  border-bottom: 1px dashed var(--surface-3);
+  padding: 2px 0;
+  width: 120px;
+  outline: none;
+  font-family: inherit;
+}
+
+.block-label-input:focus {
+  border-bottom-color: var(--accent);
+}
+
+.block-label-input::placeholder {
+  color: var(--accent);
+  opacity: 0.6;
+}
+
 .block-header .block-line {
   flex: 1;
   height: 1px;
@@ -1559,7 +1583,7 @@ function editWorkout(id) {
 }
 
 function addBlock() {
-  builderBlocks.push({ mode: 'strength', exercises: [], duration: 10, interval: 60 });
+  builderBlocks.push({ mode: 'strength', exercises: [], duration: 10, interval: 60, label: '' });
   renderBlocks();
 }
 
@@ -1656,7 +1680,8 @@ function renderBlocks() {
     return `
       <div style="margin-bottom:20px">
         <div class="block-header">
-          <span class="block-label">Block ${bi + 1}</span>
+          <input class="block-label-input" value="${esc(block.label || '')}" placeholder="Block ${bi + 1}"
+            onchange="builderBlocks[${bi}].label=this.value.trim()">
           <span class="block-line"></span>
           ${builderBlocks.length > 1 ? `<button class="btn-ghost" style="font-size:14px;padding:4px;color:var(--danger)" onclick="removeBlock(${bi})">Remove</button>` : ''}
         </div>
@@ -1901,7 +1926,8 @@ function renderTrainView() {
   if (!block) { renderWorkoutComplete(); return; }
 
   const elapsed = sessionStartTime ? formatTime(Math.floor((Date.now() - sessionStartTime) / 1000)) : '00:00';
-  let content = `<div class="workout-active-header"><div class="workout-name">${esc(activeSession.templateName)}</div><div class="workout-elapsed">${elapsed} · Block ${activeSession.currentBlock + 1}/${activeSession.blocks.length}</div></div>`;
+  const blockLabel = block.label || `Block ${activeSession.currentBlock + 1}`;
+  let content = `<div class="workout-active-header"><div class="workout-name">${esc(activeSession.templateName)}</div><div class="workout-elapsed">${elapsed} · ${esc(blockLabel)}/${activeSession.blocks.length}</div></div>`;
 
   if (block.mode === 'strength') content += renderStrengthBlock(block);
   else if (block.mode === 'emom') content += renderEmomBlock(block);
@@ -2184,7 +2210,8 @@ function renderTimerDisplay() {
   if (!block) return;
   const elapsed = sessionStartTime ? formatTime(Math.floor((Date.now() - sessionStartTime) / 1000)) : '00:00';
   const elapsedEl = document.querySelector('.workout-elapsed');
-  if (elapsedEl) elapsedEl.textContent = `${elapsed} · Block ${activeSession.currentBlock + 1}/${activeSession.blocks.length}`;
+  const bLabel = block.label || `Block ${activeSession.currentBlock + 1}`;
+  if (elapsedEl) elapsedEl.textContent = `${elapsed} · ${bLabel}/${activeSession.blocks.length}`;
   const timerEl = document.querySelector('.timer-value');
   if (!timerEl) return;
   if (block.mode === 'strength' && activeSession.isResting) {
@@ -2498,7 +2525,7 @@ function showHistoryDetail(id) {
     <p style="color:var(--text-secondary);margin-bottom:16px">${new Date(h.date).toLocaleDateString('en-GB', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' })} · ${formatTime(h.duration || 0)}</p>`;
 
   (h.blocks || []).forEach((block, bi) => {
-    html += `<div class="block-header"><span class="block-label">${block.mode.toUpperCase()}</span><span class="block-line"></span></div>`;
+    html += `<div class="block-header"><span class="block-label">${esc(block.label) || block.mode.toUpperCase()}</span><span class="block-line"></span></div>`;
     const entries = getEntries(block);
     entries.forEach(entry => {
       if (entry.type === 'exercise') {
