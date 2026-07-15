@@ -1215,6 +1215,25 @@ input[type="number"] { -moz-appearance: textfield; }
   </div>
 </div>
 
+<!-- ════════════ MODAL: SWAP EXERCISE ════════════ -->
+<div class="modal-overlay" id="modal-swap-exercise">
+  <div class="modal">
+    <div class="modal-handle"></div>
+    <h2>Swap Exercise</h2>
+    <p style="font-size:13px;color:var(--text-secondary);margin-bottom:12px" id="swap-exercise-from"></p>
+    <div class="form-group autocomplete-wrap">
+      <label class="form-label">Replace with</label>
+      <input class="form-input" id="swap-exercise-name" placeholder="Search exercises…" autocomplete="off"
+        oninput="onSwapExerciseInput()" onfocus="onSwapExerciseInput()">
+      <div class="autocomplete-list" id="swap-exercise-ac-list"></div>
+    </div>
+    <div style="display:flex;gap:10px;margin-top:8px">
+      <button class="btn btn-primary" onclick="confirmSwapExercise()" style="flex:2">Swap</button>
+      <button class="btn btn-danger btn-sm" onclick="closeModal('modal-swap-exercise')" style="flex:1">Cancel</button>
+    </div>
+  </div>
+</div>
+
 <!-- ════════════ MODAL: EXERCISE HISTORY ════════════ -->
 <div class="modal-overlay" id="modal-exercise-history">
   <div class="modal">
@@ -1949,10 +1968,11 @@ function renderStrengthBlock(block) {
       });
 
       html += `<div class="train-block-section ${!isCurrent && !isPast ? 'future' : ''}" id="entry-${entryIdx}">`;
-      html += `<div class="train-exercise-header" onclick="showExerciseHistory('${esc(ex.name).replace(/'/g, "\\'")}')">
-        <span>${esc(ex.name)}</span>
+      html += `<div class="train-exercise-header">
+        <span onclick="showExerciseHistory('${esc(ex.name).replace(/'/g, "\\'")}')" style="cursor:pointer">${esc(ex.name)}</span>
         <span class="ex-prescription">${totalSets} × ${ex.reps} · ${ex.rest || 60}s</span>
         ${lastLabel ? `<span class="ex-last">${lastLabel}</span>` : ''}
+        <button class="btn-ghost btn-sm" onclick="openSwapExercise(${bi},${ei})" style="font-size:12px;padding:4px 6px;margin-left:4px" title="Swap">⇄</button>
       </div>`;
 
       if (isCurrent && activeSession.isResting && restRemaining > 0) {
@@ -2235,6 +2255,70 @@ function adjustRest(delta) { activeSession.restDuration = Math.max(0, activeSess
 
 function skipRest() {
   activeSession.isResting = false; activeSession.timerRunning = false;
+  renderTrainView();
+}
+
+let swapBlockIdx = null, swapExIdx = null;
+
+function openSwapExercise(bi, ei) {
+  swapBlockIdx = bi;
+  swapExIdx = ei;
+  const ex = activeSession.blocks[bi].exercises[ei];
+  document.getElementById('swap-exercise-from').textContent = `Replacing: ${ex.name}`;
+  document.getElementById('swap-exercise-name').value = '';
+  document.getElementById('swap-exercise-ac-list').classList.remove('visible');
+  openModal('modal-swap-exercise');
+}
+
+function onSwapExerciseInput() {
+  const input = document.getElementById('swap-exercise-name');
+  const list = document.getElementById('swap-exercise-ac-list');
+  const query = input.value.trim().toLowerCase();
+
+  if (!query) { list.classList.remove('visible'); return; }
+
+  const matches = exerciseLibrary
+    .filter(e => e.name.toLowerCase().includes(query))
+    .sort((a, b) => {
+      const aStarts = a.name.toLowerCase().startsWith(query) ? 0 : 1;
+      const bStarts = b.name.toLowerCase().startsWith(query) ? 0 : 1;
+      return aStarts - bStarts || a.name.localeCompare(b.name);
+    })
+    .slice(0, 8);
+
+  let html = matches.map(e => {
+    const mLabel = e.measure === 'time' ? '⏱' : e.measure === 'distance' ? '📏' : '';
+    return `<div class="autocomplete-item" onmousedown="selectSwapExercise('${esc(e.name).replace(/'/g, "\\'")}')">
+      ${esc(e.name)}${e.category ? `<span class="ac-category">${esc(e.category)}</span>` : ''}${mLabel ? `<span class="ac-category">${mLabel}</span>` : ''}
+    </div>`;
+  }).join('');
+
+  if (matches.length === 0) {
+    html = '<div class="autocomplete-item" style="pointer-events:none;opacity:0.5">No matches</div>';
+  }
+
+  list.innerHTML = html;
+  list.classList.add('visible');
+}
+
+function selectSwapExercise(name) {
+  document.getElementById('swap-exercise-name').value = name;
+  document.getElementById('swap-exercise-ac-list').classList.remove('visible');
+}
+
+function confirmSwapExercise() {
+  const name = document.getElementById('swap-exercise-name').value.trim();
+  if (!name) return;
+  const inLib = exerciseLibrary.some(e => e.name.toLowerCase() === name.toLowerCase());
+  if (!inLib) return;
+  const libEx = exerciseLibrary.find(e => e.name.toLowerCase() === name.toLowerCase());
+
+  const ex = activeSession.blocks[swapBlockIdx].exercises[swapExIdx];
+  ex.name = libEx.name;
+
+  activeSession.setLogs = activeSession.setLogs.filter(l => !(l.bi === swapBlockIdx && l.ei === swapExIdx));
+
+  closeModal('modal-swap-exercise');
   renderTrainView();
 }
 
