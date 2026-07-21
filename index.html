@@ -1218,7 +1218,7 @@ input[type="number"] { -moz-appearance: textfield; }
     </div>
 
     <div style="display:flex;gap:10px;margin-top:8px">
-      <button class="btn btn-primary" onclick="saveExercise()" style="flex:2">Add</button>
+      <button class="btn btn-primary" id="exercise-save-btn" onclick="saveExercise()" style="flex:2">Add</button>
       <button class="btn btn-danger btn-sm" onclick="closeModal('modal-exercise')" style="flex:1">Cancel</button>
     </div>
   </div>
@@ -1311,6 +1311,7 @@ let editingWorkoutId = null;
 let currentBlockIndex = null;
 let currentSupersetId = null;
 let editingLibExerciseId = null;
+let editingExerciseIndex = null;
 
 // Bootstrap library from existing workouts/history if empty
 if (exerciseLibrary.length === 0) {
@@ -1624,13 +1625,13 @@ function renderBlocks() {
       exercisesHtml = entries.map(entry => {
         if (entry.type === 'exercise') {
           return `
-            <div class="exercise-item">
+            <div class="exercise-item" onclick="openEditExercise(${bi},${entry.idx})" style="cursor:pointer">
               <span class="drag-handle">⠇</span>
               <div class="exercise-info">
                 <div class="exercise-name">${esc(entry.ex.name)}</div>
                 <div class="exercise-detail">${exerciseDetail(entry.ex, 'strength')}</div>
               </div>
-              <button class="remove-btn" onclick="removeExercise(${bi},${entry.idx})">×</button>
+              <button class="remove-btn" onclick="event.stopPropagation();removeExercise(${bi},${entry.idx})">×</button>
             </div>`;
         } else {
           const labels = entry.exercises.map((_, i) => String.fromCharCode(65 + i));
@@ -1639,13 +1640,13 @@ function renderBlocks() {
 
           let innerHtml = entry.exercises.map((item, si) => `
             ${si > 0 ? '<div class="ss-connector"></div>' : ''}
-            <div class="exercise-item">
+            <div class="exercise-item" onclick="openEditExercise(${bi},${item.idx})" style="cursor:pointer">
               <span class="ss-letter">${labels[si]}</span>
               <div class="exercise-info">
                 <div class="exercise-name">${esc(item.ex.name)}</div>
                 <div class="exercise-detail">${exerciseDetail(item.ex, 'strength')}</div>
               </div>
-              <button class="remove-btn" onclick="removeExercise(${bi},${item.idx})">×</button>
+              <button class="remove-btn" onclick="event.stopPropagation();removeExercise(${bi},${item.idx})">×</button>
             </div>
           `).join('');
 
@@ -1662,13 +1663,13 @@ function renderBlocks() {
       }).join('');
     } else {
       exercisesHtml = block.exercises.map((ex, ei) => `
-        <div class="exercise-item">
+        <div class="exercise-item" onclick="openEditExercise(${bi},${ei})" style="cursor:pointer">
           <span class="drag-handle">⠇</span>
           <div class="exercise-info">
             <div class="exercise-name">${esc(ex.name)}</div>
             <div class="exercise-detail">${exerciseDetail(ex, block.mode)}</div>
           </div>
-          <button class="remove-btn" onclick="removeExercise(${bi},${ei})">×</button>
+          <button class="remove-btn" onclick="event.stopPropagation();removeExercise(${bi},${ei})">×</button>
         </div>
       `).join('');
     }
@@ -1744,7 +1745,31 @@ function openAddExerciseToSuperset(bi, ssId) {
 function openAddExercise(bi) {
   currentBlockIndex = bi;
   currentSupersetId = null;
+  editingExerciseIndex = null;
   openExerciseModal(builderBlocks[bi].mode);
+}
+
+function openEditExercise(bi, ei) {
+  currentBlockIndex = bi;
+  editingExerciseIndex = ei;
+  const block = builderBlocks[bi];
+  const ex = block.exercises[ei];
+  currentSupersetId = ex.ssId || null;
+  const mode = block.mode;
+
+  document.getElementById('exercise-name').value = ex.name;
+  document.getElementById('exercise-sets').value = ex.sets || '';
+  document.getElementById('exercise-reps').value = ex.reps || '';
+  document.getElementById('exercise-weight').value = ex.weight || '';
+  document.getElementById('exercise-rest').value = ex.rest || '';
+  document.getElementById('exercise-amrap-reps').value = ex.reps || '';
+  document.getElementById('exercise-fields-strength').style.display = mode === 'strength' ? '' : 'none';
+  document.getElementById('exercise-fields-emom').style.display = mode === 'emom' ? '' : 'none';
+  document.getElementById('exercise-fields-amrap').style.display = mode === 'amrap' ? '' : 'none';
+  applyMeasureToBuilder(ex.name);
+  selectedLibraryExercise = ex.name;
+  document.getElementById('exercise-save-btn').textContent = 'Save';
+  openModal('modal-exercise');
 }
 
 function openExerciseModal(mode) {
@@ -1759,7 +1784,9 @@ function openExerciseModal(mode) {
   document.getElementById('exercise-fields-amrap').style.display = mode === 'amrap' ? '' : 'none';
   document.getElementById('exercise-weight-label').textContent = 'Weight hint (optional)';
   document.getElementById('exercise-weight').placeholder = 'e.g. 80';
+  editingExerciseIndex = null;
   selectedLibraryExercise = null;
+  document.getElementById('exercise-save-btn').textContent = 'Add';
   openModal('modal-exercise');
 }
 
@@ -1788,7 +1815,14 @@ function saveExercise() {
     ex.reps = +document.getElementById('exercise-amrap-reps').value || 10;
   }
 
-  builderBlocks[currentBlockIndex].exercises.push(ex);
+  if (editingExerciseIndex !== null) {
+    const old = builderBlocks[currentBlockIndex].exercises[editingExerciseIndex];
+    if (old.ssId) ex.ssId = old.ssId;
+    builderBlocks[currentBlockIndex].exercises[editingExerciseIndex] = ex;
+    editingExerciseIndex = null;
+  } else {
+    builderBlocks[currentBlockIndex].exercises.push(ex);
+  }
   closeModal('modal-exercise');
   renderBlocks();
 }
@@ -1994,11 +2028,13 @@ function renderStrengthBlock(block) {
               <div style="flex:1;font-size:13px;font-weight:600;${isDone || isSkipped ? 'text-decoration:line-through;opacity:0.5' : ''}">${esc(item.ex.name)}</div>
               <div class="set-field">
                 <input class="set-input" type="number" inputmode="decimal" value="${log ? log.weight : ''}"
+                  data-log="${bi}-${item.idx}-${r}-weight"
                   onchange="updateSetLog(${bi},${item.idx},${r},'weight',+this.value)" placeholder="${placeholder}" style="width:56px">
                 <span class="set-input-label">${itemUnit}</span>
               </div>
               <div class="set-field">
                 <input class="set-input" type="number" inputmode="numeric" value="${log ? log.reps : item.ex.reps || ''}"
+                  data-log="${bi}-${item.idx}-${r}-reps"
                   onchange="updateSetLog(${bi},${item.idx},${r},'reps',+this.value)" placeholder="${item.ex.reps || '—'}" style="width:56px">
                 <span class="set-input-label">${itemMeasure === 'time' ? 'rounds' : 'reps'}</span>
               </div>
@@ -2016,7 +2052,8 @@ function renderStrengthBlock(block) {
       const isTime = measure === 'time';
       const isDist = measure === 'distance';
       const mUnit = isTime ? 'sec' : isDist ? 'm' : 'kg';
-      const lastWeight = getLastWeight(ex.name);
+      const prevLogs = getLastSetLogs(ex.name);
+      const lastWeight = prevLogs ? prevLogs[0].weight : null;
       const defaultWeight = lastWeight || ex.weight || '';
       const fmtVal = v => isTime ? formatDuration(v) : v + mUnit;
       const lastLabel = lastWeight ? `Last: ${fmtVal(lastWeight)}` : (ex.weight ? `Hint: ${fmtVal(ex.weight)}` : '');
@@ -2039,6 +2076,9 @@ function renderStrengthBlock(block) {
 
       for (let s = 0; s < totalSets; s++) {
         const log = getSetLog(bi, ei, s);
+        const prev = prevLogs && prevLogs[s];
+        const prefillWeight = log ? log.weight : (prev ? prev.weight : '');
+        const prefillReps = log ? log.reps : (prev ? prev.reps : ex.reps || '');
         const isActive = isCurrent && s === activeSession.currentSet && !allDone;
         const isDone = log && log.done;
         const isSkipped = log && log.skipped;
@@ -2046,12 +2086,14 @@ function renderStrengthBlock(block) {
           <div class="set-row ${isActive ? 'active' : ''} ${isDone ? 'completed' : ''} ${isSkipped ? 'skipped' : ''}" style="margin:0 16px">
             <div class="set-number">S${s + 1}</div>
             <div class="set-field">
-              <input class="set-input" type="number" inputmode="decimal" value="${log ? log.weight : ''}"
+              <input class="set-input" type="number" inputmode="decimal" value="${prefillWeight}"
+                data-log="${bi}-${ei}-${s}-weight"
                 onchange="updateSetLog(${bi},${ei},${s},'weight',+this.value)" placeholder="${defaultWeight || '—'}">
               <span class="set-input-label">${mUnit}</span>
             </div>
             <div class="set-field">
-              <input class="set-input" type="number" inputmode="numeric" value="${log ? log.reps : ex.reps || ''}"
+              <input class="set-input" type="number" inputmode="numeric" value="${prefillReps}"
+                data-log="${bi}-${ei}-${s}-reps"
                 onchange="updateSetLog(${bi},${ei},${s},'reps',+this.value)" placeholder="${ex.reps || '—'}">
               <span class="set-input-label">${isTime ? 'rounds' : 'reps'}</span>
             </div>
@@ -2245,8 +2287,30 @@ function getLastWeight(exerciseName) {
   return null;
 }
 
+function getLastSetLogs(exerciseName) {
+  for (const h of history) {
+    for (let bIdx = 0; bIdx < (h.blocks || []).length; bIdx++) {
+      const block = h.blocks[bIdx];
+      for (let eIdx = 0; eIdx < block.exercises.length; eIdx++) {
+        if (block.exercises[eIdx].name === exerciseName) {
+          const logs = (h.setLogs || []).filter(l => l.bi === bIdx && l.ei === eIdx && l.done);
+          if (logs.length > 0) return logs.sort((a, b) => a.si - b.si);
+        }
+      }
+    }
+  }
+  return null;
+}
+
 function getSetLog(bi, ei, si) {
   return activeSession.setLogs.find(l => l.bi === bi && l.ei === ei && l.si === si);
+}
+
+function flushSetInputs(bi, ei, si) {
+  const wEl = document.querySelector(`[data-log="${bi}-${ei}-${si}-weight"]`);
+  const rEl = document.querySelector(`[data-log="${bi}-${ei}-${si}-reps"]`);
+  if (wEl && wEl.value !== '') updateSetLog(bi, ei, si, 'weight', +wEl.value);
+  if (rEl && rEl.value !== '') updateSetLog(bi, ei, si, 'reps', +rEl.value);
 }
 
 function updateSetLog(bi, ei, si, field, value) {
@@ -2264,6 +2328,7 @@ function completeStandaloneSet(si) {
   const ei = entry.idx;
   const ex = entry.ex;
 
+  flushSetInputs(bi, ei, si);
   let log = getSetLog(bi, ei, si);
   if (!log) {
     const lw = getLastWeight(ex.name);
@@ -2296,6 +2361,7 @@ function completeSupersetExercise(round, subIdx) {
   const ei = item.idx;
   const ex = item.ex;
 
+  flushSetInputs(bi, ei, round);
   let log = getSetLog(bi, ei, round);
   if (!log) {
     const lw = getLastWeight(ex.name);
@@ -2536,8 +2602,13 @@ function showHistoryDetail(id) {
         html += `<div style="margin-bottom:12px"><div style="font-weight:700;margin-bottom:4px">${esc(entry.ex.name)}</div>`;
         if (exLogs.length > 0) html += exLogs.map(l => {
           const m = getExerciseMeasure(entry.ex.name);
-          const u = m === 'time' ? formatDuration(l.weight) : l.weight + (m === 'distance' ? 'm' : 'kg');
-          return `<div style="font-size:13px;color:var(--text-secondary)">${u} × ${l.reps}${m === 'time' ? ' rounds' : ''}</div>`;
+          const unit = m === 'time' ? '' : (m === 'distance' ? 'm' : 'kg');
+          const wVal = m === 'time' ? formatDuration(l.weight) : l.weight;
+          return `<div style="font-size:13px;display:flex;align-items:center;gap:4px;margin-bottom:2px">
+            <input type="${m === 'time' ? 'text' : 'number'}" value="${wVal}" style="width:60px;background:var(--surface-2);border:1px solid var(--border);border-radius:4px;color:var(--text);padding:2px 6px;font-size:13px;text-align:center" data-hist-log="${h.id}-${l.bi}-${l.ei}-${l.si}-weight">
+            <span style="color:var(--text-secondary)">${unit} ×</span>
+            <input type="number" value="${l.reps}" style="width:50px;background:var(--surface-2);border:1px solid var(--border);border-radius:4px;color:var(--text);padding:2px 6px;font-size:13px;text-align:center" data-hist-log="${h.id}-${l.bi}-${l.ei}-${l.si}-reps">
+            <span style="color:var(--text-secondary)">${m === 'time' ? 'rounds' : ''}</span></div>`;
         }).join('');
         else if (block.mode === 'amrap' && h.amrapRounds) html += `<div style="font-size:13px;color:var(--text-secondary)">${h.amrapRounds} rounds</div>`;
         html += '</div>';
@@ -2549,8 +2620,13 @@ function showHistoryDetail(id) {
           html += `<div style="margin-bottom:8px"><div style="font-weight:700;margin-bottom:2px;color:var(--accent)">${label}: ${esc(item.ex.name)}</div>`;
           if (exLogs.length > 0) html += exLogs.map(l => {
             const m = getExerciseMeasure(item.ex.name);
-            const u = m === 'time' ? formatDuration(l.weight) : l.weight + (m === 'distance' ? 'm' : 'kg');
-            return `<div style="font-size:13px;color:var(--text-secondary)">${u} × ${l.reps}${m === 'time' ? ' rounds' : ''}</div>`;
+            const unit = m === 'time' ? '' : (m === 'distance' ? 'm' : 'kg');
+            const wVal = m === 'time' ? formatDuration(l.weight) : l.weight;
+            return `<div style="font-size:13px;display:flex;align-items:center;gap:4px;margin-bottom:2px">
+              <input type="${m === 'time' ? 'text' : 'number'}" value="${wVal}" style="width:60px;background:var(--surface-2);border:1px solid var(--border);border-radius:4px;color:var(--text);padding:2px 6px;font-size:13px;text-align:center" data-hist-log="${h.id}-${l.bi}-${l.ei}-${l.si}-weight">
+              <span style="color:var(--text-secondary)">${unit} ×</span>
+              <input type="number" value="${l.reps}" style="width:50px;background:var(--surface-2);border:1px solid var(--border);border-radius:4px;color:var(--text);padding:2px 6px;font-size:13px;text-align:center" data-hist-log="${h.id}-${l.bi}-${l.ei}-${l.si}-reps">
+              <span style="color:var(--text-secondary)">${m === 'time' ? 'rounds' : ''}</span></div>`;
           }).join('');
           html += '</div>';
         });
@@ -2564,7 +2640,7 @@ function showHistoryDetail(id) {
     <textarea class="form-input" id="history-notes" rows="3" placeholder="How did it feel? Anything to remember next time?"
       style="resize:vertical;min-height:60px">${esc(h.notes || '')}</textarea>
   </div>
-  <button class="btn btn-primary btn-sm" onclick="saveHistoryNotes('${h.id}')" style="margin-top:4px">Save Notes</button>`;
+  <button class="btn btn-primary btn-sm" onclick="saveHistoryEntry('${h.id}')" style="margin-top:4px">Save Changes</button>`;
 
   document.getElementById('history-detail-content').innerHTML = html;
   document.getElementById('history-delete-btn').onclick = () => deleteHistoryEntry(h.id);
@@ -2579,13 +2655,20 @@ function deleteHistoryEntry(id) {
   renderHistory();
 }
 
-function saveHistoryNotes(id) {
+function saveHistoryEntry(id) {
   const h = history.find(x => x.id === id);
   if (!h) return;
   h.notes = document.getElementById('history-notes').value.trim();
+  document.querySelectorAll('[data-hist-log]').forEach(input => {
+    const parts = input.dataset.histLog.split('-');
+    if (parts[0] !== id) return;
+    const bi = +parts[1], ei = +parts[2], si = +parts[3], field = parts[4];
+    const log = (h.setLogs || []).find(l => l.bi === bi && l.ei === ei && l.si === si);
+    if (log) log[field] = field === 'reps' ? +input.value : (isNaN(+input.value) ? input.value : +input.value);
+  });
   DB.set('history', history);
   const btn = document.querySelector('#history-detail-content .btn-primary');
-  if (btn) { btn.textContent = 'Saved'; setTimeout(() => btn.textContent = 'Save Notes', 1500); }
+  if (btn) { btn.textContent = 'Saved'; setTimeout(() => btn.textContent = 'Save Changes', 1500); }
 }
 
 function showExerciseHistory(exerciseName) {
