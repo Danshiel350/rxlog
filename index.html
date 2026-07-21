@@ -1217,6 +1217,13 @@ input[type="number"] { -moz-appearance: textfield; }
       </div>
     </div>
 
+    <div id="exercise-fields-fortime" style="display:none">
+      <div class="form-group">
+        <label class="form-label">Reps per round</label>
+        <input class="form-input" id="exercise-fortime-reps" type="number" placeholder="15" inputmode="numeric">
+      </div>
+    </div>
+
     <div style="display:flex;gap:10px;margin-top:8px">
       <button class="btn btn-primary" id="exercise-save-btn" onclick="saveExercise()" style="flex:2">Add</button>
       <button class="btn btn-danger btn-sm" onclick="closeModal('modal-exercise')" style="flex:1">Cancel</button>
@@ -1568,7 +1575,7 @@ function renderWorkouts() {
           </div>
         </div>
         <div class="card-meta">
-          ${modes.map(m => `<span class="meta-tag accent">${m}</span>`).join('')}
+          ${modes.map(m => `<span class="meta-tag accent">${m === 'fortime' ? 'for time' : m}</span>`).join('')}
           ${hasSS ? '<span class="meta-tag accent">superset</span>' : ''}
         </div>
       </div>`;
@@ -1627,6 +1634,13 @@ function renderBlocks() {
           <label class="form-label">Duration (min)</label>
           <input class="form-input" type="number" value="${block.duration || 10}" inputmode="numeric"
             onchange="builderBlocks[${bi}].duration=+this.value">
+        </div>`;
+    } else if (block.mode === 'fortime') {
+      extraFields = `
+        <div class="form-group" style="margin-bottom:12px">
+          <label class="form-label">Rounds</label>
+          <input class="form-input" type="number" value="${block.rounds || 4}" inputmode="numeric"
+            onchange="builderBlocks[${bi}].rounds=+this.value">
         </div>`;
     }
 
@@ -1704,6 +1718,7 @@ function renderBlocks() {
           <button class="mode-btn ${block.mode === 'strength' ? 'active' : ''}" onclick="setBlockMode(${bi},'strength')">Strength</button>
           <button class="mode-btn ${block.mode === 'emom' ? 'active' : ''}" onclick="setBlockMode(${bi},'emom')">EMOM</button>
           <button class="mode-btn ${block.mode === 'amrap' ? 'active' : ''}" onclick="setBlockMode(${bi},'amrap')">AMRAP</button>
+          <button class="mode-btn ${block.mode === 'fortime' ? 'active' : ''}" onclick="setBlockMode(${bi},'fortime')">For Time</button>
         </div>
         ${extraFields}
         <div id="block-exercises-${bi}">${exercisesHtml}</div>
@@ -1724,6 +1739,7 @@ function exerciseDetail(ex, mode) {
   }
   if (mode === 'emom') return 'per interval';
   if (mode === 'amrap') return `${ex.reps || 0} reps/round`;
+  if (mode === 'fortime') return `${ex.reps || 0} reps/round`;
   return '';
 }
 
@@ -1774,9 +1790,11 @@ function openEditExercise(bi, ei) {
   document.getElementById('exercise-weight').value = ex.weight || '';
   document.getElementById('exercise-rest').value = ex.rest || '';
   document.getElementById('exercise-amrap-reps').value = ex.reps || '';
+  document.getElementById('exercise-fortime-reps').value = ex.reps || '';
   document.getElementById('exercise-fields-strength').style.display = mode === 'strength' ? '' : 'none';
   document.getElementById('exercise-fields-emom').style.display = mode === 'emom' ? '' : 'none';
   document.getElementById('exercise-fields-amrap').style.display = mode === 'amrap' ? '' : 'none';
+  document.getElementById('exercise-fields-fortime').style.display = mode === 'fortime' ? '' : 'none';
   applyMeasureToBuilder(ex.name);
   selectedLibraryExercise = ex.name;
   document.getElementById('exercise-save-btn').textContent = 'Save';
@@ -1793,6 +1811,7 @@ function openExerciseModal(mode) {
   document.getElementById('exercise-fields-strength').style.display = mode === 'strength' ? '' : 'none';
   document.getElementById('exercise-fields-emom').style.display = mode === 'emom' ? '' : 'none';
   document.getElementById('exercise-fields-amrap').style.display = mode === 'amrap' ? '' : 'none';
+  document.getElementById('exercise-fields-fortime').style.display = mode === 'fortime' ? '' : 'none';
   document.getElementById('exercise-weight-label').textContent = 'Weight hint (optional)';
   document.getElementById('exercise-weight').placeholder = 'e.g. 80';
   editingExerciseIndex = null;
@@ -1824,6 +1843,8 @@ function saveExercise() {
     // No reps for EMOM — just the exercise name
   } else if (mode === 'amrap') {
     ex.reps = +document.getElementById('exercise-amrap-reps').value || 10;
+  } else if (mode === 'fortime') {
+    ex.reps = +document.getElementById('exercise-fortime-reps').value || 10;
   }
 
   if (editingExerciseIndex !== null) {
@@ -1889,6 +1910,11 @@ function startWorkout(id) {
     emomStartedAt: null,
     emomPausedAt: null,
     emomPausedElapsed: 0,
+    fortimeStartedAt: null,
+    fortimePausedAt: null,
+    fortimePausedElapsed: 0,
+    fortimeRound: 0,
+    fortimeFinishTime: null,
     currentExercise: 0,
     supersetRound: 0,
     supersetExIndex: 0,
@@ -1981,6 +2007,7 @@ function renderTrainView() {
   if (block.mode === 'strength') content += renderStrengthBlock(block);
   else if (block.mode === 'emom') content += renderEmomBlock(block);
   else if (block.mode === 'amrap') content += renderAmrapBlock(block);
+  else if (block.mode === 'fortime') content += renderForTimeBlock(block);
 
   content += `<div style="padding:16px;margin-top:auto"><div style="display:flex;gap:10px">
     ${activeSession.currentBlock < activeSession.blocks.length - 1 ? `<button class="btn btn-secondary" onclick="nextBlock()">Skip Block ▸</button>` : ''}
@@ -2261,6 +2288,36 @@ function renderAmrapBlock(block) {
     </div>`;
 }
 
+function renderForTimeBlock(block) {
+  const totalRounds = block.rounds || 4;
+  const currentRound = activeSession.fortimeRound || 0;
+  const exerciseList = block.exercises.map(e => `${e.reps} ${e.name}`).join(' + ');
+  const elapsed = activeSession.fortimeStartedAt
+    ? Math.floor((Date.now() - activeSession.fortimeStartedAt - (activeSession.fortimePausedElapsed || 0)) / 1000)
+    : 0;
+  const finished = currentRound >= totalRounds;
+  return `
+    <div class="current-exercise">
+      <div class="exercise-label">FOR TIME · ${totalRounds} Rounds</div>
+      <div class="exercise-title">${exerciseList || 'No exercises'}</div>
+    </div>
+    <div class="timer-display"><div class="timer-value">${formatTime(elapsed)}</div>
+      <div class="timer-label">${finished ? 'Finished!' : (activeSession.timerRunning ? 'Elapsed' : 'Ready')}</div></div>
+    <div class="round-counter">
+      <button onclick="adjustForTimeRound(-1)">−</button>
+      <div class="round-value">${currentRound} / ${totalRounds}</div>
+      <button onclick="adjustForTimeRound(1)">+</button>
+    </div>
+    <div style="text-align:center;color:var(--text-secondary);font-size:13px;margin-bottom:16px">Rounds completed</div>
+    <div class="timer-controls">
+      ${finished
+        ? `<button class="btn btn-primary" onclick="nextBlock()">▸ ${activeSession.currentBlock < activeSession.blocks.length - 1 ? 'Next Block' : 'Finish'}</button>`
+        : (!activeSession.timerRunning
+          ? `<button class="btn btn-primary" onclick="startForTime()">▶ ${activeSession.fortimeStartedAt ? 'Resume' : 'Start'}</button>`
+          : `<button class="btn btn-secondary" onclick="pauseForTime()">❚❚ Pause</button>`)}
+    </div>`;
+}
+
 function renderTimerDisplay() {
   if (!activeSession) return;
   const block = activeSession.blocks[activeSession.currentBlock];
@@ -2281,6 +2338,11 @@ function renderTimerDisplay() {
     if (roundEl) roundEl.textContent = `EMOM · Round ${activeSession.emomCurrentRound + 1}/${block.duration || 10}`;
   } else if (block.mode === 'amrap') {
     timerEl.textContent = formatTime(Math.max(0, Math.ceil(activeSession.timerSeconds)));
+  } else if (block.mode === 'fortime') {
+    if (activeSession.fortimeStartedAt) {
+      const elapsed = Math.floor((Date.now() - activeSession.fortimeStartedAt - (activeSession.fortimePausedElapsed || 0)) / 1000);
+      timerEl.textContent = formatTime(elapsed);
+    }
   }
 }
 
@@ -2519,6 +2581,36 @@ function adjustAmrap(delta) {
   const el = document.querySelector('.round-value'); if (el) el.textContent = activeSession.amrapRounds;
 }
 
+function startForTime() {
+  if (!activeSession.fortimeStartedAt) {
+    activeSession.fortimeStartedAt = Date.now();
+    activeSession.fortimePausedElapsed = 0;
+    activeSession.fortimeRound = 0;
+  } else if (activeSession.fortimePausedAt) {
+    activeSession.fortimePausedElapsed += Date.now() - activeSession.fortimePausedAt;
+    activeSession.fortimePausedAt = null;
+  }
+  activeSession.timerRunning = true; renderTrainView();
+}
+
+function pauseForTime() {
+  activeSession.fortimePausedAt = Date.now();
+  activeSession.timerRunning = false; renderTrainView();
+}
+
+function adjustForTimeRound(delta) {
+  const block = activeSession.blocks[activeSession.currentBlock];
+  const totalRounds = block.rounds || 4;
+  const prev = activeSession.fortimeRound || 0;
+  activeSession.fortimeRound = Math.max(0, Math.min(totalRounds, prev + delta));
+  if (activeSession.fortimeRound >= totalRounds && activeSession.timerRunning) {
+    activeSession.timerRunning = false;
+    activeSession.fortimeFinishTime = Math.floor((Date.now() - activeSession.fortimeStartedAt - (activeSession.fortimePausedElapsed || 0)) / 1000);
+    vibrate();
+  }
+  renderTrainView();
+}
+
 function pauseTimer() {
   const block = activeSession.blocks[activeSession.currentBlock];
   if (block && block.mode === 'emom') activeSession.emomPausedAt = Date.now();
@@ -2531,6 +2623,8 @@ function nextBlock() {
   activeSession.currentSet = 0; activeSession.timerRunning = false; activeSession.timerSeconds = 0;
   activeSession.isResting = false; activeSession.emomCurrentRound = 0; activeSession.amrapRounds = 0;
   activeSession.emomStartedAt = null; activeSession.emomPausedAt = null; activeSession.emomPausedElapsed = 0;
+  activeSession.fortimeStartedAt = null; activeSession.fortimePausedAt = null; activeSession.fortimePausedElapsed = 0;
+  activeSession.fortimeRound = 0; activeSession.fortimeFinishTime = null;
   activeSession.supersetRound = 0; activeSession.supersetExIndex = 0;
   renderTrainView();
 }
@@ -2562,7 +2656,8 @@ function saveSession() {
   const duration = sessionStartTime ? Math.floor((Date.now() - sessionStartTime) / 1000) : 0;
   history.unshift({
     id: uid(), templateName: activeSession.templateName, date: activeSession.startedAt,
-    duration, blocks: activeSession.blocks, setLogs: activeSession.setLogs, amrapRounds: activeSession.amrapRounds,
+    duration, blocks: activeSession.blocks, setLogs: activeSession.setLogs,
+    amrapRounds: activeSession.amrapRounds, fortimeFinishTime: activeSession.fortimeFinishTime,
   });
   DB.set('history', history);
   if (timerInterval) clearInterval(timerInterval);
@@ -2593,6 +2688,7 @@ function renderHistory() {
           <div class="history-stat"><div class="stat-value">${totalSets}</div><div class="stat-label">Sets</div></div>
           ${volume > 0 ? `<div class="history-stat"><div class="stat-value">${Math.round(volume).toLocaleString()}</div><div class="stat-label">Volume (kg)</div></div>` : ''}
           ${h.amrapRounds ? `<div class="history-stat"><div class="stat-value">${h.amrapRounds}</div><div class="stat-label">Rounds</div></div>` : ''}
+          ${h.fortimeFinishTime ? `<div class="history-stat"><div class="stat-value">${formatTime(h.fortimeFinishTime)}</div><div class="stat-label">Finish Time</div></div>` : ''}
         </div>
         ${h.notes ? `<div style="margin-top:8px;font-size:12px;color:var(--text-secondary);font-style:italic;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${esc(h.notes)}</div>` : ''}
       </div>`;
@@ -2607,7 +2703,9 @@ function showHistoryDetail(id) {
     <p style="color:var(--text-secondary);margin-bottom:16px">${new Date(h.date).toLocaleDateString('en-GB', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' })} · ${formatTime(h.duration || 0)}</p>`;
 
   (h.blocks || []).forEach((block, bi) => {
-    html += `<div class="block-header"><span class="block-label">${esc(block.label) || block.mode.toUpperCase()}</span><span class="block-line"></span></div>`;
+    const modeLabel = block.mode === 'fortime' ? 'FOR TIME' : block.mode.toUpperCase();
+    html += `<div class="block-header"><span class="block-label">${esc(block.label) || modeLabel}</span><span class="block-line"></span></div>`;
+    if (block.mode === 'fortime' && h.fortimeFinishTime) html += `<div style="font-size:14px;color:var(--accent);font-weight:700;margin-bottom:8px">${formatTime(h.fortimeFinishTime)}</div>`;
     const entries = getEntries(block);
     entries.forEach(entry => {
       if (entry.type === 'exercise') {
@@ -2745,6 +2843,8 @@ function exportCSV() {
           csv += `${date},${csvEsc(h.templateName)},${csvEsc(ex.name)},,,,amrap (${h.amrapRounds || 0} rounds),${ssLabel}\n`;
         } else if (block.mode === 'emom') {
           csv += `${date},${csvEsc(h.templateName)},${csvEsc(ex.name)},,,${ex.reps || ''},emom,${ssLabel}\n`;
+        } else if (block.mode === 'fortime') {
+          csv += `${date},${csvEsc(h.templateName)},${csvEsc(ex.name)},,,${ex.reps || ''},fortime (${h.fortimeFinishTime ? formatTime(h.fortimeFinishTime) : ''}),${ssLabel}\n`;
         }
       });
     });
