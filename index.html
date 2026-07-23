@@ -1651,7 +1651,10 @@ function renderBlocks() {
         if (entry.type === 'exercise') {
           return `
             <div class="exercise-item" onclick="openEditExercise(${bi},${entry.idx})" style="cursor:pointer">
-              <span class="drag-handle">⠇</span>
+              <span class="drag-handle" style="display:flex;flex-direction:column;gap:0;line-height:1">
+                <button class="btn-ghost" style="font-size:10px;padding:0 4px" onclick="event.stopPropagation();moveExercise(${bi},${entry.idx},-1)">▲</button>
+                <button class="btn-ghost" style="font-size:10px;padding:0 4px" onclick="event.stopPropagation();moveExercise(${bi},${entry.idx},1)">▼</button>
+              </span>
               <div class="exercise-info">
                 <div class="exercise-name">${esc(entry.ex.name)}</div>
                 <div class="exercise-detail">${exerciseDetail(entry.ex, 'strength')}</div>
@@ -1689,7 +1692,10 @@ function renderBlocks() {
     } else {
       exercisesHtml = block.exercises.map((ex, ei) => `
         <div class="exercise-item" onclick="openEditExercise(${bi},${ei})" style="cursor:pointer">
-          <span class="drag-handle">⠇</span>
+          <span class="drag-handle" style="display:flex;flex-direction:column;gap:0;line-height:1">
+            <button class="btn-ghost" style="font-size:10px;padding:0 4px" onclick="event.stopPropagation();moveExercise(${bi},${ei},-1)">▲</button>
+            <button class="btn-ghost" style="font-size:10px;padding:0 4px" onclick="event.stopPropagation();moveExercise(${bi},${ei},1)">▼</button>
+          </span>
           <div class="exercise-info">
             <div class="exercise-name">${esc(ex.name)}</div>
             <div class="exercise-detail">${exerciseDetail(ex, block.mode)}</div>
@@ -1712,7 +1718,11 @@ function renderBlocks() {
           <input class="block-label-input" value="${esc(block.label || '')}" placeholder="Block ${bi + 1}"
             onchange="builderBlocks[${bi}].label=this.value.trim()">
           <span class="block-line"></span>
-          ${builderBlocks.length > 1 ? `<button class="btn-ghost" style="font-size:14px;padding:4px;color:var(--danger)" onclick="removeBlock(${bi})">Remove</button>` : ''}
+          ${builderBlocks.length > 1 ? `<span style="display:flex;gap:2px;align-items:center">
+            <button class="btn-ghost" style="font-size:14px;padding:4px" onclick="moveBlock(${bi},-1)" ${bi === 0 ? 'disabled style="opacity:0.3;font-size:14px;padding:4px"' : ''}>▲</button>
+            <button class="btn-ghost" style="font-size:14px;padding:4px" onclick="moveBlock(${bi},1)" ${bi === builderBlocks.length - 1 ? 'disabled style="opacity:0.3;font-size:14px;padding:4px"' : ''}>▼</button>
+            <button class="btn-ghost" style="font-size:14px;padding:4px;color:var(--danger)" onclick="removeBlock(${bi})">Remove</button>
+          </span>` : ''}
         </div>
         <div class="mode-selector">
           <button class="mode-btn ${block.mode === 'strength' ? 'active' : ''}" onclick="setBlockMode(${bi},'strength')">Strength</button>
@@ -1745,6 +1755,21 @@ function exerciseDetail(ex, mode) {
 
 function setBlockMode(bi, mode) { builderBlocks[bi].mode = mode; renderBlocks(); }
 function removeBlock(bi) { builderBlocks.splice(bi, 1); renderBlocks(); }
+
+function moveBlock(bi, dir) {
+  const target = bi + dir;
+  if (target < 0 || target >= builderBlocks.length) return;
+  [builderBlocks[bi], builderBlocks[target]] = [builderBlocks[target], builderBlocks[bi]];
+  renderBlocks();
+}
+
+function moveExercise(bi, ei, dir) {
+  const exs = builderBlocks[bi].exercises;
+  const target = ei + dir;
+  if (target < 0 || target >= exs.length) return;
+  [exs[ei], exs[target]] = [exs[target], exs[ei]];
+  renderBlocks();
+}
 
 function removeExercise(bi, ei) {
   builderBlocks[bi].exercises.splice(ei, 1);
